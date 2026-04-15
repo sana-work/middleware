@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Tests & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Project specifics
+Project_details.txt
+certs/*.pem
+certs/*.key
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Docker
+.docker_temp/
