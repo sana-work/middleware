@@ -11,7 +11,7 @@ The middleware acts as a robust broker that:
 6. Broadcasts real-time live progress updates to frontend clients over WebSockets
 7. Exposes REST endpoints to fetch chat status and history (with pagination)
 
-* **MongoDB**: Central data store for `sessions`, `executions`, and `events`. Guarantees idempotency via unique keys. 
+* **MongoDB**: Central data store for `sessions`, `recon` (executions), and `events`. Guarantees idempotency via unique keys. 
 
 ## Data Integrity & Kafka Semantics
 

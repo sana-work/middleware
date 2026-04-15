@@ -44,10 +44,10 @@ async def _create_indexes() -> None:
     await db.sessions.create_index("session_id", unique=True)
     await db.sessions.create_index([("soeid", pymongo.ASCENDING), ("session_id", pymongo.ASCENDING)])
 
-    # executions indexes
-    await db.executions.create_index("correlation_id", unique=True)
-    await db.executions.create_index("session_id")
-    await db.executions.create_index([("soeid", pymongo.ASCENDING), ("correlation_id", pymongo.ASCENDING)])
+    # recon (executions) indexes
+    await db.recon.create_index("correlation_id", unique=True)
+    await db.recon.create_index("session_id")
+    await db.recon.create_index([("soeid", pymongo.ASCENDING), ("correlation_id", pymongo.ASCENDING)])
 
     # events indexes
     await db.events.create_index("correlation_id")

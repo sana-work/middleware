@@ -13,7 +13,7 @@ class SessionDocument(BaseModel):
 
 
 class ExecutionDocument(BaseModel):
-    """MongoDB document shape for the executions collection."""
+    """MongoDB document shape for the recon collection (Executions)."""
     correlation_id: str
     session_id: str
     soeid: str

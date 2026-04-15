@@ -8,13 +8,13 @@ logger = get_logger(__name__)
 
 
 class ExecutionsRepository:
-    """Repository for the executions MongoDB collection."""
+    """Repository for the recon MongoDB collection (Executions)."""
 
     @staticmethod
     async def create_execution(doc: Dict[str, Any]) -> None:
         """Insert a new execution document."""
         db = get_database()
-        await db.executions.insert_one(doc)
+        await db.recon.insert_one(doc)
         logger.info("Execution created", correlation_id=doc.get("correlation_id"))
 
     @staticmethod
@@ -35,7 +35,7 @@ class ExecutionsRepository:
         if completed_at:
             update_fields["completed_at"] = completed_at
 
-        await db.executions.update_one(
+        await db.recon.update_one(
             {"correlation_id": correlation_id},
             {"$set": update_fields},
         )
@@ -50,14 +50,14 @@ class ExecutionsRepository:
     async def get_execution(correlation_id: str) -> Optional[Dict[str, Any]]:
         """Find an execution by correlation_id."""
         db = get_database()
-        doc = await db.executions.find_one({"correlation_id": correlation_id}, {"_id": 0})
+        doc = await db.recon.find_one({"correlation_id": correlation_id}, {"_id": 0})
         return doc
 
     @staticmethod
     async def get_execution_by_soeid(correlation_id: str, soeid: str) -> Optional[Dict[str, Any]]:
         """Find an execution by correlation_id with soeid ownership check."""
         db = get_database()
-        doc = await db.executions.find_one(
+        doc = await db.recon.find_one(
             {"soeid": soeid, "correlation_id": correlation_id}, {"_id": 0}
         )
         return doc
@@ -71,7 +71,7 @@ class ExecutionsRepository:
         """Find all executions for a session, with pagination."""
         db = get_database()
         cursor = (
-            db.executions.find({"session_id": session_id}, {"_id": 0})
+            db.recon.find({"session_id": session_id}, {"_id": 0})
             .sort("created_at", 1)
             .skip(skip)
             .limit(limit)
@@ -82,4 +82,4 @@ class ExecutionsRepository:
     async def count_executions_by_session(session_id: str) -> int:
         """Count total executions for a session."""
         db = get_database()
-        return await db.executions.count_documents({"session_id": session_id})
+        return await db.recon.count_documents({"session_id": session_id})
