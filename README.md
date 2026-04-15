@@ -1,4 +1,4 @@
-# OPSUI Agent Recon API (Agentic Middleware)
+#  Agent API (Agentic Middleware)
 
 A production-style Python FastAPI middleware that connects a frontend chat UI to a backend conversational agent executor. 
 
