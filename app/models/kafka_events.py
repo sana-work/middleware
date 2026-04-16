@@ -11,6 +11,7 @@ ALLOWED_EVENT_TYPES: Set[str] = {
     "AGENT_START_EVENT",
     "AGENT_COMPLETION_EVENT",
     "AGENT_ERROR_EVENT",
+    "EXECUTION_FINAL_RESPONSE",
 }
 
 # --- Normalization map ---
@@ -22,6 +23,7 @@ EVENT_NORMALIZATION_MAP: Dict[str, str] = {
     "TOOL_ERROR_EVENT": "tool_failed",
     "AGENT_COMPLETION_EVENT": "agent_completed",
     "AGENT_ERROR_EVENT": "agent_failed",
+    "EXECUTION_FINAL_RESPONSE": "agent_completed",
 }
 
 # --- Execution status transition map ---
@@ -33,6 +35,7 @@ EXECUTION_STATUS_MAP: Dict[str, str] = {
     "AGENT_COMPLETION_EVENT": "completed",
     "TOOL_ERROR_EVENT": "failed",
     "AGENT_ERROR_EVENT": "failed",
+    "EXECUTION_FINAL_RESPONSE": "completed",
 }
 
 # --- Summary generation map ---
@@ -44,6 +47,7 @@ EVENT_SUMMARY_MAP: Dict[str, str] = {
     "TOOL_ERROR_EVENT": "Tool failed: {tool_name}",
     "AGENT_COMPLETION_EVENT": "Agent completed successfully",
     "AGENT_ERROR_EVENT": "Agent execution failed",
+    "EXECUTION_FINAL_RESPONSE": "Final agent response received",
 }
 
 
