@@ -22,19 +22,19 @@ graph TB
     classDef identityNode fill:#fef2f2,stroke:#dc2626,stroke-width:2px,color:#991b1b,font-weight:bold
 
     %% ── Nodes ──
-    SOEID["🛡️ X-SOEID Gateway<br/><small>Required header enforcing<br/>ownership on all access</small>"]:::identityNode
-    UI["💬 Frontend Chat UI<br/><small>REST calls · session_id state<br/>live WS progress rendering</small>"]:::clientNode
-    TS["🔒 Token Service<br/><small>Issues OAuth/Bearer<br/>credentials</small>"]:::authNode
+    SOEID["🛡️ X-SOEID Gateway\nEnforces ownership on all access"]:::identityNode
+    UI["💬 Frontend Chat UI\nREST calls · WS progress"]:::clientNode
+    TS["🔒 Token Service\nOAuth / Bearer credentials"]:::authNode
 
-    MW["⚙️ FastAPI Agentic Middleware<br/><small>Central orchestrator: sync UI → async execution</small><br/><br/><code>API Routes</code> · <code>WS Manager</code> · <code>Services</code> · <code>Kafka Consumer</code> · <code>Audit Logger</code>"]:::mwNode
+    MW["⚙️ FastAPI Middleware\nSync UI → Async Execution\nRoutes · WS · Kafka · Audit"]:::mwNode
 
-    BE["🧠 Backend Agent Executor<br/><small>Accepts conversational tasks<br/>returns ACK, continues async</small>"]:::execNode
+    BE["🧠 Agent Executor\nAsync task processing"]:::execNode
 
-    K[("📡 Kafka Event Bus<br/><small>Streams execution events</small>")]:::eventNode
-    MG[("🗄️ MongoDB<br/><small>Source of truth: recon · sessions · events</small>")]:::dbNode
+    K[("📡 Kafka Event Bus")]:::eventNode
+    MG[("🗄️ MongoDB\nrecon · sessions · events")]:::dbNode
 
-    PROM["📊 Prometheus<br/><small>Load, health & WS metrics</small>"]:::monitorNode
-    AL["📝 Audit Logs<br/><small>Structured JSON logs</small>"]:::logNode
+    PROM["📊 Prometheus\nMetrics endpoint"]:::monitorNode
+    AL["📝 Audit Logs\nStructured JSON"]:::logNode
 
     %% ── Connections ──
     UI <-->|"REST / WS"| MW
@@ -70,43 +70,60 @@ Internal modular structure of the `app/` directory, illustrating separation of c
 
 ```mermaid
 graph TD
-    subgraph "Delivery Layer (API)"
-        CR[chat_routes.py]
-        WR[websocket_routes.py]
-        HR[health_routes.py]
-        DP[deps.py - Identity Adapter]
+    %% ── Styles ──
+    classDef delivery fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e40af,font-weight:bold
+    classDef service fill:#ecfeff,stroke:#0891b2,stroke-width:2px,color:#155e75,font-weight:bold
+    classDef client fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#9a3412,font-weight:bold
+    classDef persist fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#065f46,font-weight:bold
+
+    %% ── Delivery Layer ──
+    subgraph DELIVERY ["🌐 Delivery Layer — API"]
+        CR["📨 chat_routes.py<br/><small>POST /execute · GET /history</small>"]:::delivery
+        WR["🔌 websocket_routes.py<br/><small>WS /progress · identity gate</small>"]:::delivery
+        HR["❤️ health_routes.py<br/><small>GET /health · readiness</small>"]:::delivery
+        DP["🛡️ deps.py<br/><small>X-SOEID identity adapter</small>"]:::delivery
     end
 
-    subgraph "Service Layer (Business Logic)"
-        CES[chat_execution_service.py]
-        EPS[event_processing_service.py]
-        SS[status_service.py]
-        WM[websocket_manager.py]
+    %% ── Service Layer ──
+    subgraph SERVICES ["⚙️ Service Layer — Business Logic"]
+        CES["🧠 chat_execution_service.py<br/><small>Orchestrate execute flow</small>"]:::service
+        EPS["📥 event_processing_service.py<br/><small>Normalize & persist events</small>"]:::service
+        SS["📊 status_service.py<br/><small>Query execution status</small>"]:::service
+        WM["📡 websocket_manager.py<br/><small>Manage live WS connections</small>"]:::service
     end
 
-    subgraph "Client Layer (External Integration)"
-        TC[token_client.py]
-        BEC[backend_executor_client.py]
-        KC[kafka_consumer.py]
+    %% ── Client Layer ──
+    subgraph CLIENTS ["🔗 Client Layer — External Integration"]
+        TC["🔒 token_client.py<br/><small>OAuth token acquisition</small>"]:::client
+        BEC["🧠 backend_executor_client.py<br/><small>POST to Agent Executor</small>"]:::client
+        KC["📡 kafka_consumer.py<br/><small>Poll & consume events</small>"]:::client
     end
 
-    subgraph "Persistence Layer (DB/Repo)"
-        MO[mongo.py - Indexing]
-        SR[sessions_repository.py]
-        ER[executions_repository.py - recon]
-        EVR[events_repository.py]
+    %% ── Persistence Layer ──
+    subgraph PERSISTENCE ["🗄️ Persistence Layer — DB / Repo"]
+        MO["🔧 mongo.py<br/><small>Connection & index bootstrap</small>"]:::persist
+        SR["💬 sessions_repository.py<br/><small>Session CRUD</small>"]:::persist
+        ER["📋 executions_repository.py<br/><small>Recon collection ops</small>"]:::persist
+        EVR["📝 events_repository.py<br/><small>Event upsert & dedup</small>"]:::persist
     end
 
-    CR --> CES
-    WR --> WM
-    CES --> SR
-    CES --> ER
-    CES --> TC
-    CES --> BEC
-    KC --> EPS
-    EPS --> EVR
-    EPS --> ER
-    EPS --> WM
+    %% ── Data Flow ──
+    CR -->|"execute request"| CES
+    WR -->|"manage connections"| WM
+    CES -->|"upsert session"| SR
+    CES -->|"persist execution"| ER
+    CES -->|"fetch token"| TC
+    CES -->|"call backend"| BEC
+    KC -->|"deliver event"| EPS
+    EPS -->|"store event"| EVR
+    EPS -->|"update recon status"| ER
+    EPS -->|"broadcast live"| WM
+
+    %% ── Subgraph Styles ──
+    style DELIVERY fill:#f8faff,stroke:#3b82f6,stroke-width:2px,color:#1e40af
+    style SERVICES fill:#f0fdfa,stroke:#0891b2,stroke-width:2px,color:#155e75
+    style CLIENTS fill:#fffbf5,stroke:#ea580c,stroke-width:2px,color:#9a3412
+    style PERSISTENCE fill:#f0fdf8,stroke:#059669,stroke-width:2px,color:#065f46
 ```
 
 ---
