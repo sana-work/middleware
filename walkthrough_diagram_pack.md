@@ -9,20 +9,51 @@ This document provides a deep-dive architectural and operational walkthrough of 
 The middleware acts as a high-fidelity broker between the ephemeral frontend UI and the asynchronous backend Agent Executor.
 
 ```mermaid
-graph TD
-    UI[Frontend Chat UI] <-->|REST / WS| MW[FastAPI Middleware]
-    MW -->|Auth| TS[Token Service API]
-    MW -->|POST /execute| BE[Backend Agent Executor]
-    BE -.->|Async Events| K[(Kafka)]
-    K -.->|Consume| MW
-    MW <-->|ID & State| MG[(MongoDB)]
-    MW -.->|Metrics| PROM[Prometheus]
-    MW -.->|Audit| AL[Structured Logs]
+graph TB
+    %% ── Styles ──
+    classDef clientNode fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e40af,font-weight:bold
+    classDef mwNode fill:#ecfeff,stroke:#0891b2,stroke-width:3px,color:#155e75,font-weight:bold
+    classDef authNode fill:#f5f3ff,stroke:#7c3aed,stroke-width:2px,color:#5b21b6,font-weight:bold
+    classDef execNode fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#9a3412,font-weight:bold
+    classDef eventNode fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#065f46,font-weight:bold
+    classDef dbNode fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#065f46,font-weight:bold
+    classDef monitorNode fill:#fef2f2,stroke:#dc2626,stroke-width:2px,color:#991b1b,font-weight:bold
+    classDef logNode fill:#f8fafc,stroke:#475569,stroke-width:2px,color:#334155,font-weight:bold
+    classDef identityNode fill:#fef2f2,stroke:#dc2626,stroke-width:2px,color:#991b1b,font-weight:bold
 
-    subgraph "Identity Boundary"
+    %% ── Nodes ──
+    SOEID["🛡️ X-SOEID Gateway<br/><small>Required header enforcing<br/>ownership on all access</small>"]:::identityNode
+    UI["💬 Frontend Chat UI<br/><small>REST calls · session_id state<br/>live WS progress rendering</small>"]:::clientNode
+    TS["🔒 Token Service<br/><small>Issues OAuth/Bearer<br/>credentials</small>"]:::authNode
+
+    MW["⚙️ FastAPI Agentic Middleware<br/><small>Central orchestrator: sync UI → async execution</small><br/><br/><code>API Routes</code> · <code>WS Manager</code> · <code>Services</code> · <code>Kafka Consumer</code> · <code>Audit Logger</code>"]:::mwNode
+
+    BE["🧠 Backend Agent Executor<br/><small>Accepts conversational tasks<br/>returns ACK, continues async</small>"]:::execNode
+
+    K[("📡 Kafka Event Bus<br/><small>Streams execution events</small>")]:::eventNode
+    MG[("🗄️ MongoDB<br/><small>Source of truth: recon · sessions · events</small>")]:::dbNode
+
+    PROM["📊 Prometheus<br/><small>Load, health & WS metrics</small>"]:::monitorNode
+    AL["📝 Audit Logs<br/><small>Structured JSON logs</small>"]:::logNode
+
+    %% ── Connections ──
+    UI <-->|"REST / WS"| MW
+    SOEID -.->|"X-SOEID context"| MW
+    MW -->|"fetch token"| TS
+    MW -->|"POST /execute"| BE
+    BE -.->|"async events"| K
+    K -.->|"consume"| MW
+    MW <-->|"ID & State"| MG
+    MW -.->|"metrics"| PROM
+    MW -.->|"audit"| AL
+
+    %% ── Identity Boundary ──
+    subgraph BOUNDARY ["🔐 Identity Boundary"]
         MW
         MG
     end
+
+    style BOUNDARY fill:none,stroke:#db2777,stroke-width:2px,stroke-dasharray: 8 4,color:#db2777,font-weight:bold
 ```
 
 > [!TIP]
