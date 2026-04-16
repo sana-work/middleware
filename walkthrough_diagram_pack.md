@@ -127,6 +127,22 @@ graph TD
     style L4 fill:#f0fdf8,stroke:#059669,stroke-width:2px,stroke-dasharray: 5 5
 ```
 
+> [!NOTE]
+> **Event Lifecycle Breakdown**:
+> 1. **Ingestion**: `kafka_consumer` (KC) handsoff raw events to `event_proc_svc` (EPS).
+> 2. **Processing**: `EPS` normalizes the payload and validates idempotency.
+> 3. **Persistence**: `EPS` updates `executions_repo` (ER) and stores the raw event in `events_repo` (EVR).
+> 4. **Live Delivery**: `EPS` triggers `ws_manager` (WM) to broadcast the update to active UI clients.
+
+```mermaid
+graph LR
+    K[Kafka] --> KC[Kafka Consumer]
+    KC --> EPS[Processing Service]
+    EPS --> EVR[Events DB]
+    EPS --> ER[Status Update]
+    EPS --> WM[Live Push]
+```
+
 ---
 
 ## Slide 3: Core Design Decisions
