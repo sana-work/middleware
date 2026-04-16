@@ -68,10 +68,13 @@ class KafkaEventConsumer:
         config = self._build_config()
 
         def on_assign(consumer, partitions):
-            logger.info("Kafka partitions assigned", partitions=[str(p) for p in partitions])
+            # Use manual formatting to avoid confluent-kafka __str__ bug on Windows
+            partition_list = [f"{p.topic}[{p.partition}]" for p in partitions]
+            logger.info("Kafka partitions assigned", partitions=partition_list)
 
         def on_revoke(consumer, partitions):
-            logger.info("Kafka partitions revoked", partitions=[str(p) for p in partitions])
+            partition_list = [f"{p.topic}[{p.partition}]" for p in partitions]
+            logger.info("Kafka partitions revoked", partitions=partition_list)
 
         def error_cb(err):
             logger.error("Kafka global error", error=str(err))
