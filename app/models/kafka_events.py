@@ -32,7 +32,7 @@ EXECUTION_STATUS_MAP: Dict[str, str] = {
     "AGENT_START_EVENT": "running",
     "TOOL_INPUT_EVENT": "in_progress",
     "TOOL_OUTPUT_EVENT": "in_progress",
-    "AGENT_COMPLETION_EVENT": "completed",
+    "AGENT_COMPLETION_EVENT": "in_progress",
     "TOOL_ERROR_EVENT": "failed",
     "AGENT_ERROR_EVENT": "failed",
     "EXECUTION_FINAL_RESPONSE": "completed",
@@ -41,13 +41,13 @@ EXECUTION_STATUS_MAP: Dict[str, str] = {
 # --- Summary generation map ---
 
 EVENT_SUMMARY_MAP: Dict[str, str] = {
-    "AGENT_START_EVENT": "Agent execution started",
+    "AGENT_START_EVENT": "Agent started: {agent_name}",
     "TOOL_INPUT_EVENT": "Tool invoked: {tool_name}",
     "TOOL_OUTPUT_EVENT": "Tool output received: {tool_name}",
     "TOOL_ERROR_EVENT": "Tool failed: {tool_name}",
-    "AGENT_COMPLETION_EVENT": "Agent completed successfully",
-    "AGENT_ERROR_EVENT": "Agent execution failed",
-    "EXECUTION_FINAL_RESPONSE": "Final agent response received",
+    "AGENT_COMPLETION_EVENT": "Agent completed: {agent_name}",
+    "AGENT_ERROR_EVENT": "Agent failed: {agent_name}",
+    "EXECUTION_FINAL_RESPONSE": "Final response generated",
 }
 
 

@@ -59,7 +59,10 @@ class EventProcessingService:
 
         # Build summary
         summary_template = EVENT_SUMMARY_MAP.get(event_type, "Event received")
-        summary = summary_template.format(tool_name=raw_event.tool_name or "unknown")
+        summary = summary_template.format(
+            tool_name=raw_event.tool_name or "unknown",
+            agent_name=raw_event.agent_name or "unknown",
+        )
 
         # Build timestamp
         event_timestamp = raw_event.timestamp or format_iso(utc_now())
