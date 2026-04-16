@@ -169,7 +169,8 @@ X-SOEID: <user-id>
       {
         "event_type": "AGENT_START_EVENT",
         "normalized_event_type": "agent_started",
-        "summary": "Agent started",
+        "agent_name": "Data_Retrieval_Agent",
+        "summary": "Agent started: Data_Retrieval_Agent",
         "timestamp": "2024-04-15T10:00:01Z"
       },
       {
@@ -220,12 +221,17 @@ X-SOEID: <user-id>
         "events": [
           {
             "event_type": "AGENT_START_EVENT",
-            "summary": "Agent started",
+            "summary": "Agent started: Data_Retrieval_Agent",
             "timestamp": "2024-04-15T10:00:01Z"
           },
           {
             "event_type": "AGENT_COMPLETION_EVENT",
-            "summary": "No discrepancies found",
+            "summary": "Agent completed: Data_Retrieval_Agent",
+            "timestamp": "2024-04-15T10:00:10Z"
+          },
+          {
+            "event_type": "EXECUTION_FINAL_RESPONSE",
+            "summary": "Final response generated",
             "timestamp": "2024-04-15T10:00:20Z"
           }
         ]
@@ -352,12 +358,13 @@ Expected cadence: every 15 seconds.
 
 | Kafka / Normalized Event | Execution Status | Frontend Meaning | Suggested UI Treatment |
 | :--- | :--- | :--- | :--- |
-| `AGENT_START_EVENT` | `running` | Agent run started | Show “Agent is thinking…” |
+| `AGENT_START_EVENT` | `running` | An agent started | Show “Agent [Name] is thinking…” |
 | `TOOL_INPUT_EVENT` | `in_progress` | Tool started | Show tool step spinner / “Running Tool: [Tool Name]…” |
 | `TOOL_OUTPUT_EVENT` | `in_progress` | Tool produced output | Pulse the tool step or append progress text |
-| `AGENT_COMPLETION_EVENT` | `completed` | Final success | Display final result and stop loading |
+| `AGENT_COMPLETION_EVENT` | `in_progress` | Specific agent finished | Note completion of sub-task; continue waiting for final response |
 | `TOOL_ERROR_EVENT` | `failed` | Tool failure | Show warning/error on the tool step |
 | `AGENT_ERROR_EVENT` | `failed` | Run failure | Show global error banner for the run |
+| `EXECUTION_FINAL_RESPONSE` | `completed` | Final success | Display final result and stop loading |
 
 ---
 

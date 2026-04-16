@@ -32,6 +32,7 @@ def test_normalization_values():
     assert EVENT_NORMALIZATION_MAP["TOOL_ERROR_EVENT"] == "tool_failed"
     assert EVENT_NORMALIZATION_MAP["AGENT_COMPLETION_EVENT"] == "agent_completed"
     assert EVENT_NORMALIZATION_MAP["AGENT_ERROR_EVENT"] == "agent_failed"
+    assert EVENT_NORMALIZATION_MAP["EXECUTION_FINAL_RESPONSE"] == "agent_completed"
 
 
 def test_execution_status_values():
@@ -39,9 +40,10 @@ def test_execution_status_values():
     assert EXECUTION_STATUS_MAP["AGENT_START_EVENT"] == "running"
     assert EXECUTION_STATUS_MAP["TOOL_INPUT_EVENT"] == "in_progress"
     assert EXECUTION_STATUS_MAP["TOOL_OUTPUT_EVENT"] == "in_progress"
-    assert EXECUTION_STATUS_MAP["AGENT_COMPLETION_EVENT"] == "completed"
+    assert EXECUTION_STATUS_MAP["AGENT_COMPLETION_EVENT"] == "in_progress"
     assert EXECUTION_STATUS_MAP["TOOL_ERROR_EVENT"] == "failed"
     assert EXECUTION_STATUS_MAP["AGENT_ERROR_EVENT"] == "failed"
+    assert EXECUTION_STATUS_MAP["EXECUTION_FINAL_RESPONSE"] == "completed"
 
 
 def test_ignored_event_types():
@@ -98,7 +100,7 @@ async def test_process_agent_start_event(mock_settings):
         assert result["event_type"] == "AGENT_START_EVENT"
         assert result["normalized_event_type"] == "agent_started"
         assert result["status"] == "running"
-        assert result["summary"] == "Agent execution started"
+        assert result["summary"] == "Agent started: recon_ops_investigator_agent"
 
         mock_insert.assert_called_once()
         mock_update.assert_called_once()

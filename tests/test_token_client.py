@@ -20,6 +20,7 @@ async def test_token_fetch_success(token_client_instance, mock_settings):
         "access_token": "test-token-value",
         "expires_in": 3600,
     }
+    mock_response.text = '{"access_token": "test-token-value", "expires_in": 3600}'
     mock_response.raise_for_status = MagicMock()
 
     with patch("app.clients.token_client.httpx.AsyncClient") as mock_client_cls:
@@ -54,6 +55,7 @@ async def test_token_refresh_after_expiry(token_client_instance, mock_settings):
         "access_token": "new-token-value",
         "expires_in": 3600,
     }
+    mock_response.text = '{"access_token": "new-token-value", "expires_in": 3600}'
     mock_response.raise_for_status = MagicMock()
 
     with patch("app.clients.token_client.httpx.AsyncClient") as mock_client_cls:
