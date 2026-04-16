@@ -65,9 +65,19 @@ class KafkaEventConsumer:
         self._running = True
         config = self._build_config()
 
+        def on_assign(consumer, partitions):
+            logger.info("Kafka partitions assigned", partitions=[str(p) for p in partitions])
+
+        def on_revoke(consumer, partitions):
+            logger.info("Kafka partitions revoked", partitions=[str(p) for p in partitions])
+
         try:
             self._consumer = Consumer(config)
-            self._consumer.subscribe([settings.KAFKA_TOPIC])
+            self._consumer.subscribe(
+                [settings.KAFKA_TOPIC],
+                on_assign=on_assign,
+                on_revoke=on_revoke
+            )
             logger.info("Kafka consumer subscribed", topic=settings.KAFKA_TOPIC)
         except KafkaException as e:
             logger.error("Failed to initialize Kafka consumer", error=str(e))
