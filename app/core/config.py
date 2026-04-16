@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     KAFKA_SSL_CERTFILE: Optional[str] = None
     KAFKA_SSL_KEYFILE: Optional[str] = None
     KAFKA_SSL_PASSWORD: Optional[str] = None
+    KAFKA_DEBUG: Optional[str] = None
 
     # Token Settings
     TOKEN_URL: str = "http://localhost:8080/token"

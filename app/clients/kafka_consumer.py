@@ -57,6 +57,8 @@ class KafkaEventConsumer:
             config["ssl.key.location"] = settings.KAFKA_SSL_KEYFILE
         if settings.KAFKA_SSL_PASSWORD:
             config["ssl.key.password"] = settings.KAFKA_SSL_PASSWORD
+        if settings.KAFKA_DEBUG:
+            config["debug"] = settings.KAFKA_DEBUG
 
         return config
 
@@ -70,6 +72,12 @@ class KafkaEventConsumer:
 
         def on_revoke(consumer, partitions):
             logger.info("Kafka partitions revoked", partitions=[str(p) for p in partitions])
+
+        def error_cb(err):
+            logger.error("Kafka global error", error=str(err))
+
+        # Add global error callback to help diagnose connection/SSL issues
+        config["error_cb"] = error_cb
 
         try:
             self._consumer = Consumer(config)
