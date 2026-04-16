@@ -60,7 +60,10 @@ class BackendExecutorClient:
             session_id=session_id,
         )
 
-        async with httpx.AsyncClient(timeout=settings.BACKEND_REQUEST_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(
+            timeout=settings.BACKEND_REQUEST_TIMEOUT_SECONDS,
+            verify=settings.BACKEND_VERIFY_SSL
+        ) as client:
             try:
                 resp = await client.post(url, json=body, headers=headers)
                 resp.raise_for_status()

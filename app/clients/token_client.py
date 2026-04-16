@@ -41,7 +41,10 @@ class TokenClient:
     )
     async def _fetch_token(self) -> str:
         """POST to token endpoint to obtain a new access token."""
-        async with httpx.AsyncClient(timeout=settings.TOKEN_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(
+            timeout=settings.TOKEN_TIMEOUT_SECONDS,
+            verify=settings.TOKEN_VERIFY_SSL
+        ) as client:
             try:
                 resp = await client.post(
                     settings.TOKEN_URL,
@@ -56,17 +59,44 @@ class TokenClient:
                 logger.error("Token fetch request error", error=str(e))
                 raise TokenFetchError(f"Token fetch request failed: {e}") from e
 
-        data = resp.json()
+        raw_text = resp.text.strip()
+
+        # Case 1: Response is a raw JWT string (starts with 'ey' prefix)
+        if raw_text.startswith("ey"):
+            logger.info("Detected raw JWT response format")
+            self._token = raw_text
+            # Fallback expiry if not provided in JSON
+            self._expires_at = time.time() + settings.TOKEN_TIMEOUT_SECONDS - _REFRESH_BUFFER_SECONDS
+            return self._token
+
+        # Case 2: Response is a JSON object
+        try:
+            data = resp.json()
+        except Exception as e:
+            logger.error(
+                "Failed to decode token response as JSON",
+                error=str(e),
+                content_snippet=raw_text[:200],
+                status_code=resp.status_code
+            )
+            raise TokenFetchError(
+                f"Token service returned unexpected format (Status: {resp.status_code})"
+            ) from e
+
         access_token = data.get("access_token")
         if not access_token:
-            raise TokenFetchError("Token response missing 'access_token' field")
+            # Maybe the whole JSON is just the token string? (rare but possible)
+            if isinstance(data, str) and data.startswith("ey"):
+                access_token = data
+            else:
+                raise TokenFetchError("Token response missing 'access_token' field")
 
         # Determine expiry: use expires_in from response, or fall back to TOKEN_TIMEOUT_SECONDS
-        expires_in = data.get("expires_in", settings.TOKEN_TIMEOUT_SECONDS)
+        expires_in = data.get("expires_in", settings.TOKEN_TIMEOUT_SECONDS) if isinstance(data, dict) else settings.TOKEN_TIMEOUT_SECONDS
         self._token = access_token
         self._expires_at = time.time() + expires_in - _REFRESH_BUFFER_SECONDS
 
-        logger.info("Token fetched successfully", expires_in=expires_in)
+        logger.info("Token fetched successfully (JSON format)", expires_in=expires_in)
         return self._token
 
 

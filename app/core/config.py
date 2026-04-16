@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
     LOG_LEVEL: str = "INFO"
+    LOG_FILE_PATH: str = "logs/app.log"
     CORS_ALLOW_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # MongoDB Settings
@@ -28,6 +29,7 @@ class Settings(BaseSettings):
     TOKEN_URL: str = "http://localhost:8080/token"
     TOKEN_CLIENT_SECRET: str = "placeholder"
     TOKEN_TIMEOUT_SECONDS: int = 30
+    TOKEN_VERIFY_SSL: bool = True
 
     # Backend Executor Settings
     BACKEND_EXECUTOR_BASE_URL: str = "http://localhost:8081"
@@ -35,6 +37,7 @@ class Settings(BaseSettings):
     BACKEND_CONFIG_ID: str = "placeholder"
     BACKEND_APPLICATION_ID: str = "placeholder"
     BACKEND_REQUEST_TIMEOUT_SECONDS: int = 60
+    BACKEND_VERIFY_SSL: bool = True
 
     # WebSocket Settings
     WEBSOCKET_HEARTBEAT_SECONDS: int = 15

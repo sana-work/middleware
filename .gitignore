@@ -24,3 +24,6 @@ certs/*.key
 
 # Docker
 .docker_temp/
+
+# Logs
+logs/
