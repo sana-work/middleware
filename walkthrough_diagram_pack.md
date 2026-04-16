@@ -69,51 +69,62 @@ graph TB
 Internal modular structure of the `app/` directory, illustrating separation of concerns between delivery, logic, and persistence.
 
 ```mermaid
-graph LR
+graph TD
     classDef api fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e40af
     classDef svc fill:#ecfeff,stroke:#0891b2,stroke-width:2px,color:#155e75
     classDef ext fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#9a3412
     classDef db fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#065f46
 
-    subgraph API ["🌐 API"]
+    subgraph L1 ["🌐 API Layer"]
         CR[chat_routes]:::api
         WR[ws_routes]:::api
-        HR[health]:::api
-        DP[deps / auth]:::api
     end
 
-    subgraph SVC ["⚙️ Services"]
+    subgraph L2 ["⚙️ Service Layer"]
         CES[execution_svc]:::svc
         EPS[event_proc_svc]:::svc
-        SS[status_svc]:::svc
         WM[ws_manager]:::svc
     end
 
-    subgraph EXT ["🔗 Clients"]
+    subgraph L3 ["🔗 External Clients"]
         TC[token_client]:::ext
         BEC[executor_client]:::ext
         KC[kafka_consumer]:::ext
     end
 
-    subgraph DB ["🗄️ Persistence"]
-        MO[mongo]:::db
+    subgraph L4 ["🗄️ Persistence"]
         SR[sessions_repo]:::db
         ER[executions_repo]:::db
         EVR[events_repo]:::db
     end
 
-    CR --> CES
-    WR --> WM
-    CES --> SR & ER
-    CES --> TC & BEC
-    KC --> EPS
-    EPS --> EVR & ER
-    EPS --> WM
+    %% Enforce Layering
+    L1 ~~~ L2
+    L2 ~~~ L3
+    L2 ~~~ L4
 
-    style API fill:#f8faff,stroke:#3b82f6,stroke-width:2px
-    style SVC fill:#f0fdfa,stroke:#0891b2,stroke-width:2px
-    style EXT fill:#fffbf5,stroke:#ea580c,stroke-width:2px
-    style DB fill:#f0fdf8,stroke:#059669,stroke-width:2px
+    %% API to Services
+    CR -->|POST| CES
+    WR -->|WS| WM
+
+    %% Services to Clients
+    CES -->|fetch auth| TC
+    CES -->|POST /execute| BEC
+    KC -->|poll| EPS
+
+    %% Services to DB
+    CES -->|insert| SR
+    CES -->|insert| ER
+    EPS -->|upsert| EVR
+    EPS -->|update| ER
+
+    %% Internal Service
+    EPS -->|broadcast| WM
+
+    style L1 fill:#f8faff,stroke:#3b82f6,stroke-width:2px,stroke-dasharray: 5 5
+    style L2 fill:#f0fdfa,stroke:#0891b2,stroke-width:2px,stroke-dasharray: 5 5
+    style L3 fill:#fffbf5,stroke:#ea580c,stroke-width:2px,stroke-dasharray: 5 5
+    style L4 fill:#f0fdf8,stroke:#059669,stroke-width:2px,stroke-dasharray: 5 5
 ```
 
 ---
