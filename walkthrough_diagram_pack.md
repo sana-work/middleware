@@ -78,33 +78,33 @@ graph TD
 
     %% ── Delivery Layer ──
     subgraph DELIVERY ["🌐 Delivery Layer — API"]
-        CR["📨 chat_routes.py<br/><small>POST /execute · GET /history</small>"]:::delivery
-        WR["🔌 websocket_routes.py<br/><small>WS /progress · identity gate</small>"]:::delivery
-        HR["❤️ health_routes.py<br/><small>GET /health · readiness</small>"]:::delivery
-        DP["🛡️ deps.py<br/><small>X-SOEID identity adapter</small>"]:::delivery
+        CR["📨 chat_routes.py\nPOST /execute · GET /history"]:::delivery
+        WR["🔌 websocket_routes.py\nWS /progress · identity gate"]:::delivery
+        HR["❤️ health_routes.py\nGET /health · readiness"]:::delivery
+        DP["🛡️ deps.py\nX-SOEID identity adapter"]:::delivery
     end
 
     %% ── Service Layer ──
     subgraph SERVICES ["⚙️ Service Layer — Business Logic"]
-        CES["🧠 chat_execution_service.py<br/><small>Orchestrate execute flow</small>"]:::service
-        EPS["📥 event_processing_service.py<br/><small>Normalize & persist events</small>"]:::service
-        SS["📊 status_service.py<br/><small>Query execution status</small>"]:::service
-        WM["📡 websocket_manager.py<br/><small>Manage live WS connections</small>"]:::service
+        CES["🧠 chat_execution_service.py\nOrchestrate execute flow"]:::service
+        EPS["📥 event_processing_service.py\nNormalize & persist events"]:::service
+        SS["📊 status_service.py\nQuery execution status"]:::service
+        WM["📡 websocket_manager.py\nManage live WS connections"]:::service
     end
 
     %% ── Client Layer ──
     subgraph CLIENTS ["🔗 Client Layer — External Integration"]
-        TC["🔒 token_client.py<br/><small>OAuth token acquisition</small>"]:::client
-        BEC["🧠 backend_executor_client.py<br/><small>POST to Agent Executor</small>"]:::client
-        KC["📡 kafka_consumer.py<br/><small>Poll & consume events</small>"]:::client
+        TC["🔒 token_client.py\nOAuth token acquisition"]:::client
+        BEC["🧠 backend_executor_client.py\nPOST to Agent Executor"]:::client
+        KC["📡 kafka_consumer.py\nPoll & consume events"]:::client
     end
 
     %% ── Persistence Layer ──
     subgraph PERSISTENCE ["🗄️ Persistence Layer — DB / Repo"]
-        MO["🔧 mongo.py<br/><small>Connection & index bootstrap</small>"]:::persist
-        SR["💬 sessions_repository.py<br/><small>Session CRUD</small>"]:::persist
-        ER["📋 executions_repository.py<br/><small>Recon collection ops</small>"]:::persist
-        EVR["📝 events_repository.py<br/><small>Event upsert & dedup</small>"]:::persist
+        MO["🔧 mongo.py\nConnection & index bootstrap"]:::persist
+        SR["💬 sessions_repository.py\nSession CRUD"]:::persist
+        ER["📋 executions_repository.py\nRecon collection ops"]:::persist
+        EVR["📝 events_repository.py\nEvent upsert & dedup"]:::persist
     end
 
     %% ── Data Flow ──
