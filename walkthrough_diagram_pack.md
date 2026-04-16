@@ -69,61 +69,51 @@ graph TB
 Internal modular structure of the `app/` directory, illustrating separation of concerns between delivery, logic, and persistence.
 
 ```mermaid
-graph TD
-    %% ── Styles ──
-    classDef delivery fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e40af,font-weight:bold
-    classDef service fill:#ecfeff,stroke:#0891b2,stroke-width:2px,color:#155e75,font-weight:bold
-    classDef client fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#9a3412,font-weight:bold
-    classDef persist fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#065f46,font-weight:bold
+graph LR
+    classDef api fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e40af
+    classDef svc fill:#ecfeff,stroke:#0891b2,stroke-width:2px,color:#155e75
+    classDef ext fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#9a3412
+    classDef db fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#065f46
 
-    %% ── Delivery Layer ──
-    subgraph DELIVERY ["🌐 Delivery Layer — API"]
-        CR["📨 chat_routes.py\nPOST /execute · GET /history"]:::delivery
-        WR["🔌 websocket_routes.py\nWS /progress · identity gate"]:::delivery
-        HR["❤️ health_routes.py\nGET /health · readiness"]:::delivery
-        DP["🛡️ deps.py\nX-SOEID identity adapter"]:::delivery
+    subgraph API ["🌐 API"]
+        CR[chat_routes]:::api
+        WR[ws_routes]:::api
+        HR[health]:::api
+        DP[deps / auth]:::api
     end
 
-    %% ── Service Layer ──
-    subgraph SERVICES ["⚙️ Service Layer — Business Logic"]
-        CES["🧠 chat_execution_service.py\nOrchestrate execute flow"]:::service
-        EPS["📥 event_processing_service.py\nNormalize & persist events"]:::service
-        SS["📊 status_service.py\nQuery execution status"]:::service
-        WM["📡 websocket_manager.py\nManage live WS connections"]:::service
+    subgraph SVC ["⚙️ Services"]
+        CES[execution_svc]:::svc
+        EPS[event_proc_svc]:::svc
+        SS[status_svc]:::svc
+        WM[ws_manager]:::svc
     end
 
-    %% ── Client Layer ──
-    subgraph CLIENTS ["🔗 Client Layer — External Integration"]
-        TC["🔒 token_client.py\nOAuth token acquisition"]:::client
-        BEC["🧠 backend_executor_client.py\nPOST to Agent Executor"]:::client
-        KC["📡 kafka_consumer.py\nPoll & consume events"]:::client
+    subgraph EXT ["🔗 Clients"]
+        TC[token_client]:::ext
+        BEC[executor_client]:::ext
+        KC[kafka_consumer]:::ext
     end
 
-    %% ── Persistence Layer ──
-    subgraph PERSISTENCE ["🗄️ Persistence Layer — DB / Repo"]
-        MO["🔧 mongo.py\nConnection & index bootstrap"]:::persist
-        SR["💬 sessions_repository.py\nSession CRUD"]:::persist
-        ER["📋 executions_repository.py\nRecon collection ops"]:::persist
-        EVR["📝 events_repository.py\nEvent upsert & dedup"]:::persist
+    subgraph DB ["🗄️ Persistence"]
+        MO[mongo]:::db
+        SR[sessions_repo]:::db
+        ER[executions_repo]:::db
+        EVR[events_repo]:::db
     end
 
-    %% ── Data Flow ──
-    CR -->|"execute request"| CES
-    WR -->|"manage connections"| WM
-    CES -->|"upsert session"| SR
-    CES -->|"persist execution"| ER
-    CES -->|"fetch token"| TC
-    CES -->|"call backend"| BEC
-    KC -->|"deliver event"| EPS
-    EPS -->|"store event"| EVR
-    EPS -->|"update recon status"| ER
-    EPS -->|"broadcast live"| WM
+    CR --> CES
+    WR --> WM
+    CES --> SR & ER
+    CES --> TC & BEC
+    KC --> EPS
+    EPS --> EVR & ER
+    EPS --> WM
 
-    %% ── Subgraph Styles ──
-    style DELIVERY fill:#f8faff,stroke:#3b82f6,stroke-width:2px,color:#1e40af
-    style SERVICES fill:#f0fdfa,stroke:#0891b2,stroke-width:2px,color:#155e75
-    style CLIENTS fill:#fffbf5,stroke:#ea580c,stroke-width:2px,color:#9a3412
-    style PERSISTENCE fill:#f0fdf8,stroke:#059669,stroke-width:2px,color:#065f46
+    style API fill:#f8faff,stroke:#3b82f6,stroke-width:2px
+    style SVC fill:#f0fdfa,stroke:#0891b2,stroke-width:2px
+    style EXT fill:#fffbf5,stroke:#ea580c,stroke-width:2px
+    style DB fill:#f0fdf8,stroke:#059669,stroke-width:2px
 ```
 
 ---
