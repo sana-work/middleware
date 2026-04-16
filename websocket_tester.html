@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentic Middleware - WebSocket Tester</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; padding: 2rem; background: #f4f7f6; color: #333; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { color: #0b3d91; margin-top: 0; }
+        .input-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: bold; font-size: 0.9rem; }
+        input { width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-family: monospace; }
+        button { background: #0b3d91; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:disabled { background: #ccc; }
+        #log { margin-top: 1.5rem; background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; height: 400px; overflow-y: auto; font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; }
+        .success { color: #4ec9b0; }
+        .error { color: #f44747; }
+        .info { color: #569cd6; }
+        .event { color: #ce9178; border-bottom: 1px solid #333; padding-bottom: 4px; margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>WebSocket Live Tester</h1>
+    <p>Use this tool to monitor live execution events from the middleware.</p>
+    
+    <div class="input-group">
+        <label for="soeid">Your SOEID (Identity)</label>
+        <input type="text" id="soeid" placeholder="e.g., si39191" value="si39191">
+    </div>
+
+    <div class="input-group">
+        <label for="cid">Correlation ID (from /execute response)</label>
+        <input type="text" id="cid" placeholder="Paste your correlation_id here...">
+    </div>
+
+    <button id="connectBtn">Connect to Stream</button>
+    <button id="clearBtn" style="background: #666;">Clear Log</button>
+
+    <div id="log">
+        <div class="info">Ready. Enter your IDs and click Connect.</div>
+    </div>
+</div>
+
+<script>
+    const connectBtn = document.getElementById('connectBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const log = document.getElementById('log');
+    const cidInput = document.getElementById('cid');
+    const soeidInput = document.getElementById('soeid');
+
+    let ws = null;
+
+    function appendLog(msg, type = 'info') {
+        const div = document.createElement('div');
+        div.className = type;
+        div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        log.appendChild(div);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    connectBtn.onclick = () => {
+        const cid = cidInput.value.trim();
+        const soeid = soeidInput.value.trim();
+
+        if (!cid || !soeid) {
+            alert("Please provide both SOEID and Correlation ID");
+            return;
+        }
+
+        if (ws) {
+            ws.close();
+        }
+
+        const url = `ws://localhost:8000/ws/v1/chat/progress/${cid}?soeid=${soeid}`;
+        appendLog(`Connecting to ${url}...`, 'info');
+        
+        ws = new WebSocket(url);
+
+        ws.onopen = () => {
+            appendLog("Connected successfully!", "success");
+            connectBtn.disabled = true;
+            connectBtn.textContent = "Connected";
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            appendLog(`Received: ${JSON.stringify(data, null, 2)}`, 'event');
+        };
+
+        ws.onclose = (event) => {
+            appendLog(`Disconnected (Code: ${event.code})`, event.code === 1000 ? 'info' : 'error');
+            if (event.code === 1008) {
+                appendLog("Error 1008: Policy Violation (Check if SOEID matches the owner of this execution)", "error");
+            }
+            connectBtn.disabled = false;
+            connectBtn.textContent = "Connect to Stream";
+            ws = null;
+        };
+
+        ws.onerror = (error) => {
+            appendLog("WebSocket error occurred.", "error");
+        };
+    };
+
+    clearBtn.onclick = () => {
+        log.innerHTML = '<div class="info">Log cleared. Ready.</div>';
+    };
+</script>
+
+</body>
+</html>
