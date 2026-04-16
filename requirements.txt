@@ -11,3 +11,4 @@ slowapi>=0.1.9
 prometheus-client>=0.20.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.5
+gunicorn>=21.2.0
