@@ -250,20 +250,40 @@ X-SOEID: <user-id>
 ---
 
 ### 5.4 GET `/api/v1/chat/export/pdf/{correlation_id}`
-Download a full PDF report of an execution's lifecycle, including the request context, internal agent logs/timeline, and final output.
+Download a high-fidelity, branded PDF report of an execution's full lifecycle. Use this for audit trails, compliance, or sharing results.
 
 #### Request headers
 ```http
 X-SOEID: <user-id>
 ```
 
-#### Query params
-- `download=true` (Forces browser attachment download hook, default is true)
+#### Important: Handling Binary Streams
+Since the endpoint is authenticated via the `X-SOEID` header, a simple `<a href="...">` link will not work. The frontend MUST use `fetch` and handle the response as a **Blob**.
 
-#### Frontend behavior
-- The frontend should show a **"Download PDF"** button next to or inside executions.
-- The button should be available at least for terminal runs (`completed` or `failed`).
-- Hitting this endpoint returns `Content-Type: application/pdf`, the browser should download the returned PDF file directly.
+**Recommended Frontend Implementation (JavaScript):**
+```javascript
+const downloadReport = async (correlationId) => {
+  const response = await fetch(`/api/v1/chat/export/pdf/${correlationId}`, {
+    headers: { 'X-SOEID': currentUserSoeid }
+  });
+
+  if (!response.ok) throw new Error('Failed to generate report');
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Execution_Report_${correlationId}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+};
+```
+
+#### UI Integration Recommendations
+- **Placement**: Add a "Download Report" (📄) icon in the Chat Message header for each execution turn.
+- **Availability**: Only enable the button when the execution status is `completed` or `failed`.
+- **Loading State**: Show a small spinner/loading state on the button while the binary stream is being built by the middleware.
 
 ---
 
