@@ -1,23 +1,12 @@
 import json
 from typing import Optional
-from jinja2 import Environment, FileSystemLoader
+from io import BytesIO
 
-try:
-    from weasyprint import HTML
-except (ImportError, OSError) as e:
-    HTML = None
-    # Weasyprint requires GTK3 C-libraries (Pango/Cairo/GObject).
-    # If missing (especially on Windows), it throws OSError via cffi.
-
-try:
-    from reportlab.lib.pagesizes import LETTER
-    from reportlab.lib import colors
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from io import BytesIO
-    REPORTLAB_AVAILABLE = True
-except ImportError:
-    REPORTLAB_AVAILABLE = False
+from reportlab.lib.pagesizes import LETTER
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 
 from app.models.export_models import ExportExecutionDTO, ExportEventDTO
 from app.db.repositories.executions_repository import ExecutionsRepository
@@ -28,7 +17,10 @@ logger = get_logger(__name__)
 
 
 class PDFExportService:
-    """Service to aggregate execution data and generate PDF reports via WeasyPrint."""
+    """
+    Service to aggregate execution data and generate PDF reports.
+    Standardized on ReportLab for robust cross-platform compatibility (Windows/Linux).
+    """
 
     @staticmethod
     async def build_export_dto(
@@ -64,31 +56,29 @@ class PDFExportService:
             )
             event_dtos.append(ev_dto)
 
-            # Capture the final text response for the summary block
+            # Capture final response or errors for the summary block
             if event_type == "EXECUTION_FINAL_RESPONSE" or status == "completed":
-                raw_payload = event.get("raw_payload", {})
+                raw_payload = event.get("raw_payload", {}) or {}
                 normalized_payload = event.get("normalized_payload", {}) or {}
-                
                 resp = raw_payload.get("response", "") or normalized_payload.get("response", "")
+                
                 if isinstance(resp, dict):
                     final_response = json.dumps(resp, indent=2)
                 elif resp:
                     final_response = str(resp)
                     
-            # Capture the first failure reason for the summary block
             elif status == "failed" and not error_details:
-                raw_payload = event.get("raw_payload", {})
+                raw_payload = event.get("raw_payload", {}) or {}
                 err = raw_payload.get("response", "") or event.get("summary", "Unknown failure")
                 if isinstance(err, dict):
                     error_details = json.dumps(err, indent=2)
                 else:
                     error_details = str(err)
 
-        # Fallback if no specific payload contained a response string
         if not final_response and execution.get("status") == "completed":
              final_response = "Execution completed successfully."
         
-        dto = ExportExecutionDTO(
+        return ExportExecutionDTO(
             soeid=soeid,
             session_id=execution.get("session_id", ""),
             correlation_id=correlation_id,
@@ -101,95 +91,120 @@ class PDFExportService:
             final_response=final_response,
             error_details=error_details
         )
-        return dto
 
     @staticmethod
     async def generate_pdf(
         correlation_id: str, soeid: str, include_raw: bool = False
     ) -> Optional[bytes]:
-        """Generate PDF bytes for an execution, with fallback to ReportLab if WeasyPrint is missing."""
+        """Core PDF generator using ReportLab."""
         dto = await PDFExportService.build_export_dto(correlation_id, soeid, include_raw)
         if not dto:
             return None
 
-        if HTML is not None:
-            try:
-                # Primary: WeasyPrint (HTML-to-PDF)
-                env = Environment(loader=FileSystemLoader("app/templates"))
-                template = env.get_template("execution_report.html")
-                html_content = template.render(report=dto.model_dump())
-                pdf_bytes = HTML(string=html_content).write_pdf()
-                logger.info("Generated PDF via WeasyPrint", correlation_id=correlation_id)
-                return pdf_bytes
-            except Exception as e:
-                logger.error("WeasyPrint rendering failed, trying fallback", error=str(e))
-
-        if REPORTLAB_AVAILABLE:
-            # Fallback: ReportLab (Direct PDF generation)
-            logger.info("Generating PDF via ReportLab fallback", correlation_id=correlation_id)
-            return PDFExportService._generate_pdf_reportlab(dto)
-
-        raise RuntimeError("No PDF generation engine available (WeasyPrint and ReportLab both failed or missing).")
-
-    @staticmethod
-    def _generate_pdf_reportlab(dto: ExportExecutionDTO) -> bytes:
-        """Fallback PDF generator using ReportLab for environments without GTK3."""
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=LETTER)
+        doc = SimpleDocTemplate(
+            buffer, 
+            pagesize=LETTER,
+            rightMargin=50, leftMargin=50,
+            topMargin=50, bottomMargin=50
+        )
+        
         styles = getSampleStyleSheet()
+        
+        # Custom Styles
+        title_style = ParagraphStyle(
+            'ReportTitle',
+            parent=styles['Title'],
+            fontSize=22,
+            textColor=colors.HexColor("#003366"),
+            spaceAfter=20,
+            alignment=1 # Centered
+        )
+        
+        heading_style = ParagraphStyle(
+            'SectionHeading',
+            parent=styles['Heading2'],
+            fontSize=16,
+            textColor=colors.HexColor("#00509d"),
+            spaceBefore=15,
+            spaceAfter=10,
+            borderPadding=5
+        )
+
+        metadata_label_style = ParagraphStyle(
+            'MetaLabel',
+            parent=styles['Normal'],
+            fontSize=10,
+            fontName='Helvetica-Bold',
+            textColor=colors.grey
+        )
+
         elements = []
 
-        # Title
-        elements.append(Paragraph("Agentic Execution Report (Fallback)", styles['Title']))
-        elements.append(Spacer(1, 12))
+        # Header Area (Logo Placeholder + Title)
+        elements.append(Paragraph("AGENTIC MIDDLEWARE", ParagraphStyle('brand', fontSize=10, textColor=colors.grey, letterSpacing=2, alignment=1)))
+        elements.append(Paragraph("EXECUTION REPORT", title_style))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#003366"), spaceAfter=20))
 
-        # Metadata
+        # Metadata Summary Table
         meta_data = [
-            ["SOEID:", dto.soeid],
-            ["Session ID:", dto.session_id],
-            ["Correlation ID:", dto.correlation_id],
-            ["Status:", dto.status.upper()],
-            ["Started At:", dto.started_at or "N/A"],
-            ["Completed At:", dto.completed_at or "N/A"]
+            [Paragraph("USER ID (SOEID)", metadata_label_style), Paragraph(dto.soeid, styles['Normal'])],
+            [Paragraph("SESSION ID", metadata_label_style), Paragraph(dto.session_id, styles['Normal'])],
+            [Paragraph("CORRELATION ID", metadata_label_style), Paragraph(dto.correlation_id, styles['Normal'])],
+            [Paragraph("RUN STATUS", metadata_label_style), Paragraph(dto.status.upper(), ParagraphStyle('stat', fontName='Helvetica-Bold', textColor=colors.green if dto.status == 'completed' else colors.red if dto.status == 'failed' else colors.black))],
+            [Paragraph("START TIME", metadata_label_style), Paragraph(dto.started_at or "N/A", styles['Normal'])],
+            [Paragraph("END TIME", metadata_label_style), Paragraph(dto.completed_at or "N/A", styles['Normal'])]
         ]
-        t = Table(meta_data, colWidths=[120, 350])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
+        
+        meta_table = Table(meta_data, colWidths=[1.5*inch, 4.5*inch])
+        meta_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.whitesmoke),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+            ('TOPPADDING', (0,0), (-1,-1), 8),
         ]))
-        elements.append(t)
+        elements.append(meta_table)
         elements.append(Spacer(1, 20))
 
-        # Request
-        elements.append(Paragraph("User Request", styles['Heading2']))
-        elements.append(Paragraph(dto.request_context, styles['BodyText']))
-        elements.append(Spacer(1, 20))
+        # User Input Section
+        elements.append(Paragraph("REQUEST CONTEXT", heading_style))
+        elements.append(Paragraph(dto.request_context, ParagraphStyle('req', parent=styles['Normal'], leftIndent=10, rightIndent=10, backColor=colors.whitesmoke, borderPadding=10)))
+        elements.append(Spacer(1, 10))
 
-        # Timeline
-        elements.append(Paragraph("Execution Timeline", styles['Heading2']))
-        for event in dto.events:
-            time_str = f"<b>{event.timestamp}</b> - {event.summary}"
-            elements.append(Paragraph(time_str, styles['BodyText']))
-            detail_str = f"Type: {event.event_type} | Status: {event.status}"
+        # Timeline Section
+        elements.append(Paragraph("EXECUTION TIMELINE", heading_style))
+        last_idx = len(dto.events) - 1
+        for i, event in enumerate(dto.events):
+            # Formatted Event Block
+            time_part = f"<font color='grey' size='9'>{event.timestamp}</font>"
+            summary_part = f"<b>{event.summary}</b>"
+            elements.append(Paragraph(f"{time_part} | {summary_part}", styles['Normal']))
+            
+            # Sub-details
+            details = [f"Type: {event.normalized_event_type or event.event_type}"]
             if event.tool_name:
-                detail_str += f" | Tool: {event.tool_name}"
-            elements.append(Paragraph(detail_str, ParagraphStyle('sub', fontSize=8, leftIndent=10, textColor=colors.grey)))
-            elements.append(Spacer(1, 5))
+                details.append(f"Tool: {event.tool_name}")
+            
+            elements.append(Paragraph(" &bull; ".join(details), ParagraphStyle('ev_sub', fontSize=8, leftIndent=15, textColor=colors.grey)))
+            
+            if i < last_idx:
+                elements.append(Spacer(1, 8))
 
-        # Final Response
+        # Final Outcome Section
         if dto.final_response:
-            elements.append(Spacer(1, 15))
-            elements.append(Paragraph("Final Response", styles['Heading2']))
-            elements.append(Paragraph(dto.final_response, styles['BodyText']))
+            elements.append(Paragraph("FINAL RESPONSE", heading_style))
+            elements.append(Paragraph(dto.final_response, ParagraphStyle('resp', parent=styles['Normal'], backColor=colors.HexColor("#f0f7ff"), borderPadding=10)))
 
-        # Error Details
         if dto.error_details:
-            elements.append(Spacer(1, 15))
-            elements.append(Paragraph("Error Details", styles['Heading2']))
-            elements.append(Paragraph(dto.error_details, ParagraphStyle('err', textColor=colors.red)))
+             elements.append(Paragraph("FAILURE DETAILS", heading_style))
+             elements.append(Paragraph(dto.error_details, ParagraphStyle('fail', parent=styles['Normal'], backColor=colors.HexColor("#fff0f0"), borderPadding=10, textColor=colors.darkred)))
+
+        # Footer
+        elements.append(Spacer(1, 0.5*inch))
+        elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey))
+        elements.append(Paragraph("Generated by Recon Agent Middleware • Internal Use Only", ParagraphStyle('footer', fontSize=8, textColor=colors.grey, alignment=1)))
 
         doc.build(elements)
+        logger.info("Generated polished PDF via ReportLab", correlation_id=correlation_id, soeid=soeid)
         return buffer.getvalue()
