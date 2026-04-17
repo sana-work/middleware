@@ -132,6 +132,11 @@ class KafkaEventConsumer:
         # 1. Parse JSON safely
         try:
             payload = json.loads(raw_value.decode("utf-8"))
+            logger.info(
+                "Kafka message received",
+                offset=offset,
+                top_level_keys=list(payload.keys()) if isinstance(payload, dict) else "non-dict"
+            )
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.error(
                 "Malformed Kafka message, skipping",
@@ -160,6 +165,13 @@ class KafkaEventConsumer:
         event_type = payload.get("event_type")
         x_correlation_id = payload.get("x_correlation_id") or payload.get("correlation_id")
         
+        logger.info(
+            "Payload after unwrapping",
+            correlation_id=x_correlation_id,
+            event_type=event_type,
+            extracted_keys=list(payload.keys())
+        )
+
         # 3.5 Infer event_type if missing based on status (SUCCESS/FAILED)
         if not event_type:
             status_val = payload.get("status")
@@ -173,7 +185,7 @@ class KafkaEventConsumer:
 
         # 4. Filter by allowed event types (Now using the unwrapped/inferred event_type)
         if event_type not in ALLOWED_EVENT_TYPES:
-            logger.debug("Ignored event type after unwrapping", event_type=event_type, offset=offset)
+            logger.info("Ignored event type after unwrapping", event_type=event_type, correlation_id=x_correlation_id, offset=offset)
             self._safe_commit(msg)
             return
 
