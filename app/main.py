@@ -19,6 +19,7 @@ from prometheus_client import make_asgi_app
 from app.api.chat_routes import router as chat_router
 from app.api.websocket_routes import router as ws_router
 from app.api.health_routes import router as health_router
+from app.api.export_routes import router as export_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -67,3 +68,4 @@ async def backend_executor_error_handler(request: Request, exc: BackendExecutorE
 app.include_router(chat_router)
 app.include_router(ws_router)
 app.include_router(health_router)
+app.include_router(export_router)

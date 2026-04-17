@@ -6,7 +6,7 @@ Generated from local source inspection on 2026-04-16.
 
 This guide is intentionally written as a teaching document. It explains the codebase from the outside in, then from the inside out: first the system purpose and runtime behavior, then each file, function, mapping, data model, and integration point.
 
-Verification note: I created a local `venv/`, installed `requirements.txt`, and reran the test suite with `venv/bin/python -m pytest tests/ -q`. After correcting the token-client test mocks so mocked HTTP responses include realistic `.text` JSON strings, the suite passed: `29 passed in 6.56s`.
+Verification note: the guide has been refreshed after the PDF export feature was added. I updated the local `venv/` with the new `requirements.txt` entries (`weasyprint`, `Jinja2`) and reran `venv/bin/pytest tests/ -q`. The current local macOS run stops during collection because WeasyPrint cannot load native GObject/Pango libraries (`libgobject-2.0-0`). The Dockerfile now installs the corresponding Linux libraries, so containerized runs should have the PDF engine dependencies present; local macOS needs equivalent system packages before the full suite can collect.
 
 ---
 
@@ -99,16 +99,19 @@ The middleware is therefore both:
 - `app/api/chat_routes.py`: REST endpoints for execute, status, and history.
 - `app/api/websocket_routes.py`: WebSocket endpoint for live progress.
 - `app/api/health_routes.py`: liveness and readiness probes.
+- `app/api/export_routes.py`: REST endpoint for generating a PDF execution report.
 - `app/services/chat_execution_service.py`: orchestrates the execute flow.
 - `app/services/event_processing_service.py`: normalizes Kafka events, persists them, updates execution state, and returns broadcast payloads.
 - `app/services/status_service.py`: reads MongoDB and builds status/history responses.
 - `app/services/websocket_manager.py`: tracks live WebSocket clients and sends event/status/terminal/heartbeat messages.
+- `app/services/pdf_export_service.py`: loads execution/event data and renders printable PDF bytes with Jinja2 and WeasyPrint.
 - `app/clients/token_client.py`: fetches and caches external auth tokens.
 - `app/clients/backend_executor_client.py`: calls the backend agent executor.
 - `app/clients/kafka_consumer.py`: consumes Kafka messages and coordinates persistence, broadcast, and offset commits.
 - `app/db/mongo.py`: owns MongoDB connection and indexes.
 - `app/db/repositories/*.py`: collection-specific MongoDB operations.
-- `app/models/*.py`: Pydantic request, response, DB, Kafka, and WebSocket schemas.
+- `app/models/*.py`: Pydantic request, response, DB, Kafka, WebSocket, and export DTO schemas.
+- `app/templates/execution_report.html`: Jinja2/HTML template used by the PDF export service.
 - `app/utils/*.py`: IDs, timestamps, retry decorator, and audit logging.
 - `tests/*.py`: intended behavior around execute, token, backend client, event processing, Kafka integrity, and WebSocket manager.
 
@@ -126,6 +129,7 @@ It calls:
 - `WS /ws/v1/chat/progress/{correlation_id}?soeid=USER` for live updates.
 - `GET /api/v1/chat/status/{correlation_id}` to refresh or recover the state of a single execution.
 - `GET /api/v1/chat/history/{session_id}` to rebuild a whole conversation.
+- `GET /api/v1/chat/export/pdf/{correlation_id}` to download or view a PDF report for one execution.
 
 The frontend must preserve two identifiers:
 
@@ -392,6 +396,7 @@ The core lifecycle is:
 │   │   ├── __init__.py
 │   │   ├── chat_routes.py
 │   │   ├── deps.py
+│   │   ├── export_routes.py
 │   │   ├── health_routes.py
 │   │   └── websocket_routes.py
 │   ├── clients
@@ -420,6 +425,7 @@ The core lifecycle is:
 │   │   ├── api_requests.py
 │   │   ├── api_responses.py
 │   │   ├── db_models.py
+│   │   ├── export_models.py
 │   │   ├── kafka_events.py
 │   │   └── websocket_messages.py
 │   ├── services
@@ -427,9 +433,12 @@ The core lifecycle is:
 │   │   ├── chat_execution_service.py
 │   │   ├── event_processing_service.py
 │   │   ├── metrics_service.py
+│   │   ├── pdf_export_service.py
 │   │   ├── session_service.py
 │   │   ├── status_service.py
 │   │   └── websocket_manager.py
+│   ├── templates
+│   │   └── execution_report.html
 │   └── utils
 │       ├── __init__.py
 │       ├── audit_logger.py
@@ -442,6 +451,7 @@ The core lifecycle is:
     ├── test_backend_executor_client.py
     ├── test_chat_execute_endpoint.py
     ├── test_event_processing_service.py
+    ├── test_export_service.py
     ├── test_integrity_integration.py
     ├── test_token_client.py
     └── test_websocket_manager.py
@@ -489,6 +499,7 @@ Important dependency groups:
 - logging: `structlog`
 - rate limiting: `slowapi`
 - metrics: `prometheus-client`
+- PDF export: `weasyprint`, `Jinja2`
 - tests: `pytest`, `pytest-asyncio`
 
 ### `Dockerfile`
@@ -499,6 +510,7 @@ Responsibility:
 
 - uses Python 3.11 slim
 - installs `build-essential` and `librdkafka-dev`
+- installs WeasyPrint native rendering libraries: Cairo, Pango, GDK Pixbuf, libffi, and shared MIME info
 - installs Python requirements
 - copies app source
 - creates non-root `appuser`
@@ -531,6 +543,8 @@ Responsibility: explains the middleware, MongoDB, Kafka idempotency, commit-afte
 
 Current README also documents the multi-agent orchestration interpretation: intermediate `AGENT_COMPLETION_EVENT` values are treated as `in_progress`, and only `EXECUTION_FINAL_RESPONSE` marks the whole execution as `completed`.
 
+Current README also lists the PDF export API: `GET /api/v1/chat/export/pdf/{correlation_id}?download=true`.
+
 ### `deployment_and_testing_walkthrough.md`
 
 Why it exists: operational setup and verification guide.
@@ -541,7 +555,7 @@ Responsibility: environment prep, SSL certificate setup, running locally or in D
 
 Why it exists: frontend integration contract.
 
-Responsibility: endpoint contract, identifiers, auth/identity expectations, WebSocket behavior, and UI recovery guidance.
+Responsibility: endpoint contract, identifiers, auth/identity expectations, WebSocket behavior, PDF export behavior, and UI recovery guidance.
 
 Important note: this file was already modified before this guide was created. This guide did not modify it.
 
@@ -618,6 +632,7 @@ HTTP and WebSocket delivery layer. Routes should be thin and delegate business b
 - `chat_routes.py`: execute/status/history.
 - `websocket_routes.py`: live progress socket.
 - `health_routes.py`: health and readiness.
+- `export_routes.py`: PDF execution report export.
 - `deps.py`: shared identity extraction dependency.
 
 ### `app/clients/`
@@ -655,6 +670,7 @@ Pydantic schemas and mapping constants.
 - `api_requests.py`: inbound REST request bodies.
 - `api_responses.py`: REST response models.
 - `db_models.py`: documented MongoDB document shapes.
+- `export_models.py`: DTOs used when assembling a PDF export.
 - `kafka_events.py`: raw/normalized Kafka events and event/status/summary maps.
 - `websocket_messages.py`: WebSocket message envelopes.
 
@@ -668,6 +684,13 @@ Business logic.
 - `session_service.py`: session ID resolution.
 - `websocket_manager.py`: active WebSocket connection manager.
 - `metrics_service.py`: Prometheus metrics definitions.
+- `pdf_export_service.py`: PDF report DTO construction and rendering.
+
+### `app/templates/`
+
+HTML templates used by server-side rendering flows.
+
+- `execution_report.html`: Jinja2 template rendered by `PDFExportService` before WeasyPrint converts HTML to PDF bytes.
 
 ### `app/utils/`
 
@@ -685,6 +708,7 @@ Tests are organized around units and important integration semantics:
 - `conftest.py`: fixtures.
 - `test_chat_execute_endpoint.py`: REST execute behavior.
 - `test_event_processing_service.py`: event maps and event processing.
+- `test_export_service.py`: PDF export DTO building and export route headers/error behavior.
 - `test_integrity_integration.py`: ownership, idempotency, commit safety.
 - `test_backend_executor_client.py`: backend HTTP client.
 - `test_token_client.py`: token fetch/cache behavior.
@@ -918,6 +942,93 @@ The response intentionally contains enough information for the frontend to:
 - track the run
 - keep the conversation ID
 - open a live progress WebSocket
+
+## PDF export flow: Mongo timeline to downloadable report
+
+### Step 1: frontend requests a report
+
+Request:
+
+```http
+GET /api/v1/chat/export/pdf/{correlation_id}?download=true
+X-SOEID: TEST001
+```
+
+Optional query parameters:
+
+- `download`: when true, response uses `Content-Disposition: attachment`; when false, response uses `inline`.
+- `include_raw`: when true, raw Kafka payload excerpts are included in event timeline DTOs and rendered in the PDF template.
+- `include_timestamps`: currently accepted for API/spec alignment but not passed into the service; the template always renders event timestamps it receives.
+
+### Step 2: export route reads identity header
+
+Unlike `chat_routes.py`, `export_routes.py` does not use `get_current_user`. It directly requires:
+
+```python
+x_soeid: str = Header(...)
+```
+
+That means this route requires an `X-SOEID` header specifically. It does not accept the `soeid` query fallback used by the shared identity dependency.
+
+### Step 3: route delegates to PDF service
+
+`export_execution_pdf` calls:
+
+```python
+PDFExportService.generate_pdf(
+    correlation_id=correlation_id,
+    soeid=x_soeid,
+    include_raw=include_raw,
+)
+```
+
+The route itself does not query MongoDB. Ownership and data assembly happen inside the service.
+
+### Step 4: service builds an export DTO
+
+`generate_pdf` calls `build_export_dto`.
+
+`build_export_dto`:
+
+1. Loads execution with `ExecutionsRepository.get_execution_by_soeid(correlation_id, soeid)`.
+2. Returns `None` if missing or unauthorized.
+3. Loads ordered events with `EventsRepository.get_events_by_correlation(correlation_id)`.
+4. Converts each raw Mongo event into an `ExportEventDTO`.
+5. Extracts `final_response` from `EXECUTION_FINAL_RESPONSE` or any event whose status is `completed`.
+6. Extracts `error_details` from the first failed event.
+7. Returns `ExportExecutionDTO`.
+
+### Step 5: service renders PDF
+
+`generate_pdf`:
+
+1. Verifies WeasyPrint's `HTML` class is available.
+2. Loads `app/templates/execution_report.html` through Jinja2 `FileSystemLoader`.
+3. Renders the template with `report=dto.model_dump()`.
+4. Converts HTML to PDF bytes using `HTML(string=html_content).write_pdf()`.
+5. Returns `bytes`.
+
+### Step 6: route returns PDF response
+
+If bytes are returned:
+
+- response body is PDF bytes
+- `Content-Type` is `application/pdf`
+- `Content-Disposition` is attachment or inline with filename `agentic_execution_{correlation_id}.pdf`
+
+If service returns `None`, route returns `404` with:
+
+```json
+{"detail": "Execution not found or access denied."}
+```
+
+If the PDF engine fails, route returns `500`.
+
+### Risks / edge cases
+
+- WeasyPrint needs native system libraries. Docker installs Linux libraries, but local macOS must have equivalent libraries available or app import/test collection can fail.
+- `include_raw=true` can place raw event payload data in the PDF, which may include sensitive backend details.
+- The route uses `X-SOEID` directly instead of shared `get_current_user`, so auth behavior differs slightly from other REST routes.
 
 ## WebSocket flow: frontend attaches to live updates
 
@@ -1265,6 +1376,7 @@ Creates a WSGI/ASGI-compatible Prometheus metrics app mounted at `/metrics`.
 from app.api.chat_routes import router as chat_router
 from app.api.websocket_routes import router as ws_router
 from app.api.health_routes import router as health_router
+from app.api.export_routes import router as export_router
 ```
 
 Route modules are imported and included at the bottom.
@@ -1397,6 +1509,7 @@ Frontend/backend impact: frontend can treat `404` as missing/unavailable and `50
 app.include_router(chat_router)
 app.include_router(ws_router)
 app.include_router(health_router)
+app.include_router(export_router)
 ```
 
 What it does: attaches route modules to the app.
@@ -1405,7 +1518,7 @@ Why it exists: without inclusion, endpoints are not exposed.
 
 Inputs: APIRouter instances.
 
-Outputs: public HTTP and WebSocket routes.
+Outputs: public HTTP, WebSocket, health, metrics, and PDF export routes.
 
 ## `app/core/config.py`
 
@@ -2011,6 +2124,123 @@ Risks:
 - Token and backend checks are config checks, not network calls. They do not prove external services are reachable.
 - Kafka check reports initialized/running, not necessarily able to consume successfully forever.
 
+## `app/api/export_routes.py`
+
+### Purpose
+
+Defines the REST endpoint that turns one execution timeline into a PDF report.
+
+The route reconstructs the report from MongoDB through `PDFExportService`; it does not use WebSocket state.
+
+### Imports
+
+```python
+from fastapi import APIRouter, Header, Query, HTTPException, Request
+from fastapi.responses import Response
+```
+
+FastAPI provides route construction, required header extraction, query parameters, HTTP exceptions, and raw binary response support.
+
+```python
+from app.services.pdf_export_service import PDFExportService
+from app.core.logging import get_logger
+```
+
+The service performs DTO assembly and PDF rendering. The logger records denial and generation failures.
+
+### Router
+
+```python
+router = APIRouter(prefix="/api/v1/chat/export")
+```
+
+The route defined as `@router.get("/pdf/{correlation_id}")` becomes:
+
+```text
+GET /api/v1/chat/export/pdf/{correlation_id}
+```
+
+### Endpoint: `export_execution_pdf`
+
+Signature:
+
+```python
+async def export_execution_pdf(
+    request: Request,
+    correlation_id: str,
+    x_soeid: str = Header(...),
+    include_timestamps: bool = Query(True, ...),
+    include_raw: bool = Query(False, ...),
+    download: bool = Query(True, ...),
+)
+```
+
+### Code block: service call
+
+```python
+pdf_bytes = await PDFExportService.generate_pdf(
+    correlation_id=correlation_id,
+    soeid=x_soeid,
+    include_raw=include_raw,
+)
+```
+
+What it does: asks the PDF service to verify ownership, gather MongoDB data, render HTML, and return PDF bytes.
+
+Why it exists: keeps route logic focused on HTTP response behavior.
+
+Inputs: path `correlation_id`, required `X-SOEID` header, `include_raw` query option.
+
+Outputs: bytes or `None`.
+
+Called by: FastAPI when frontend requests a PDF.
+
+Calls into: `PDFExportService.generate_pdf`.
+
+Risks / edge cases: this route does not use the shared `get_current_user`, so it requires the header form of identity and does not accept `soeid` query fallback.
+
+### Code block: not found / unauthorized
+
+```python
+if not pdf_bytes:
+    logger.warning("PDF export denied or missing", ...)
+    raise HTTPException(status_code=404, detail="Execution not found or access denied.")
+```
+
+What it does: treats missing execution and ownership mismatch the same way.
+
+Why it exists: matches the privacy policy used by status/history routes, though the JSON shape is FastAPI's default `{"detail": ...}` rather than the custom `{"success": false, "message": ...}` shape.
+
+### Code block: response headers
+
+```python
+headers = {"Content-Type": "application/pdf"}
+if download:
+    headers["Content-Disposition"] = f'attachment; filename="agentic_execution_{correlation_id}.pdf"'
+else:
+    headers["Content-Disposition"] = f'inline; filename="agentic_execution_{correlation_id}.pdf"'
+return Response(content=pdf_bytes, headers=headers)
+```
+
+What it does: returns raw PDF bytes and tells the browser whether to download or render inline.
+
+Frontend impact: `download=true` is appropriate for a button-triggered file download; `download=false` lets browsers/plugins display inline.
+
+### Code block: error handling
+
+```python
+except RuntimeError:
+    raise HTTPException(status_code=500, detail="Cannot generate PDF on this server.")
+except Exception:
+    raise HTTPException(status_code=500, detail="An error occurred building the export.")
+```
+
+What it does: converts rendering failures to `500`.
+
+Why it exists: PDF generation depends on external native libraries and template rendering, both of which can fail independently of MongoDB.
+
+Important import-time risk: `pdf_export_service.py` catches `ImportError` when importing WeasyPrint, but native library load failures can raise `OSError` during import. On a local machine without GObject/Pango, importing `app.main` can fail before this route-level `RuntimeError` handler is reached.
+
 ## `app/services/chat_execution_service.py`
 
 ### Purpose
@@ -2289,6 +2519,242 @@ Returns:
 - skip
 
 What would break if removed: frontend could not rebuild conversation history.
+
+## `app/services/pdf_export_service.py`
+
+### Purpose
+
+Builds a printable execution report from MongoDB and renders it to PDF bytes.
+
+This service is part of the recovery/history side of the system. It does not start executions, process Kafka, or use WebSocket state. It reads the durable MongoDB source of truth and formats it for export.
+
+### Imports
+
+```python
+import json
+from typing import Optional
+from jinja2 import Environment, FileSystemLoader
+```
+
+`json` is used to stringify dict responses and errors. Jinja2 loads and renders the HTML report template.
+
+```python
+try:
+    from weasyprint import HTML
+except ImportError:
+    HTML = None
+```
+
+WeasyPrint converts rendered HTML into PDF bytes. If the Python package is not installed, `HTML` becomes `None` and `generate_pdf` raises `RuntimeError`.
+
+Important nuance: missing native WeasyPrint libraries can raise `OSError`, not `ImportError`, during import. In that case app import can fail before `HTML = None` is assigned.
+
+```python
+from app.models.export_models import ExportExecutionDTO, ExportEventDTO
+from app.db.repositories.executions_repository import ExecutionsRepository
+from app.db.repositories.events_repository import EventsRepository
+```
+
+The service shapes MongoDB documents into export DTOs, using existing repositories for ownership-safe execution lookup and event timeline loading.
+
+### Class: `PDFExportService`
+
+Stateless service with two static async methods:
+
+- `build_export_dto`
+- `generate_pdf`
+
+### Function: `build_export_dto`
+
+Signature:
+
+```python
+async def build_export_dto(
+    correlation_id: str, soeid: str, include_raw: bool = False
+) -> Optional[ExportExecutionDTO]
+```
+
+### Code block: ownership-safe execution lookup
+
+```python
+execution = await ExecutionsRepository.get_execution_by_soeid(correlation_id, soeid)
+if not execution:
+    return None
+```
+
+What it does: verifies that the execution exists and belongs to the requesting SOEID.
+
+Why it exists: PDF exports contain request context, timeline, final response, and possibly raw payload excerpts, so they must be protected exactly like status/history.
+
+Inputs: `correlation_id`, `soeid`.
+
+Outputs: execution document or `None`.
+
+DB impact: reads `recon` using `(soeid, correlation_id)`.
+
+### Code block: events loading
+
+```python
+events = await EventsRepository.get_events_by_correlation(correlation_id)
+```
+
+What it does: loads the durable event timeline for the execution.
+
+Why it exists: the PDF is reconstructed from MongoDB, not from transient WebSocket state.
+
+DB impact: reads `events`, sorted by timestamp by repository behavior.
+
+### Code block: event DTO loop
+
+```python
+for event in events:
+    event_type = event.get("event_type")
+    status = event.get("status")
+    excerpt = event.get("raw_payload") if include_raw else None
+    ev_dto = ExportEventDTO(...)
+    event_dtos.append(ev_dto)
+```
+
+What it does: transforms Mongo event documents into a report-specific event shape.
+
+Why it exists: the PDF template should consume a stable DTO, not arbitrary MongoDB documents.
+
+Inputs: Mongo event fields.
+
+Outputs: `ExportEventDTO` entries.
+
+Risks / edge cases: `include_raw=True` can expose raw backend payloads in the PDF.
+
+### Code block: final response extraction
+
+```python
+if event_type == "EXECUTION_FINAL_RESPONSE" or status == "completed":
+    raw_payload = event.get("raw_payload", {})
+    normalized_payload = event.get("normalized_payload", {}) or {}
+    resp = raw_payload.get("response", "") or normalized_payload.get("response", "")
+```
+
+What it does: finds a final response string for the report summary block.
+
+Why it exists: the event timeline may contain final answer content inside raw or normalized payloads; the PDF needs a prominent final-response section.
+
+Outputs:
+
+- dict responses are pretty-printed JSON
+- scalar responses become strings
+
+Risk: any event with `status == "completed"` can set `final_response`, not only `EXECUTION_FINAL_RESPONSE`.
+
+### Code block: failure extraction
+
+```python
+elif status == "failed" and not error_details:
+    raw_payload = event.get("raw_payload", {})
+    err = raw_payload.get("response", "") or event.get("summary", "Unknown failure")
+```
+
+What it does: captures the first failure reason.
+
+Why it exists: failed reports should show a clear error summary near the top/bottom of the PDF.
+
+Outputs:
+
+- dict errors are pretty-printed JSON
+- scalar errors become strings
+
+### Code block: completed fallback
+
+```python
+if not final_response and execution.get("status") == "completed":
+    final_response = "Execution completed successfully."
+```
+
+What it does: provides a friendly completion message if no event payload contains final text.
+
+Why it exists: completed executions should not render an empty final section just because payload data is absent.
+
+### Code block: DTO assembly
+
+```python
+dto = ExportExecutionDTO(
+    soeid=soeid,
+    session_id=execution.get("session_id", ""),
+    correlation_id=correlation_id,
+    status=execution.get("status", "unknown"),
+    request_context=execution.get("request_context", "N/A"),
+    ...
+)
+```
+
+What it does: creates the full report DTO consumed by the template.
+
+Called by: `generate_pdf`; tests also call it directly.
+
+### Function: `generate_pdf`
+
+Signature:
+
+```python
+async def generate_pdf(
+    correlation_id: str, soeid: str, include_raw: bool = False
+) -> Optional[bytes]
+```
+
+### Code block: engine availability
+
+```python
+if HTML is None:
+    raise RuntimeError("WeasyPrint is not installed or available.")
+```
+
+What it does: fails clearly if the Python package import failed.
+
+Why it exists: PDF generation cannot proceed without WeasyPrint.
+
+### Code block: DTO creation
+
+```python
+dto = await PDFExportService.build_export_dto(correlation_id, soeid, include_raw)
+if not dto:
+    return None
+```
+
+What it does: builds report data and preserves 404/unauthorized behavior by returning `None`.
+
+Called by: `export_routes.export_execution_pdf`.
+
+### Code block: template render
+
+```python
+env = Environment(loader=FileSystemLoader("app/templates"))
+template = env.get_template("execution_report.html")
+html_content = template.render(report=dto.model_dump())
+```
+
+What it does: loads the HTML template and renders it with the DTO as a plain dict.
+
+Why it exists: HTML/CSS is easier to design and WeasyPrint can render it to PDF.
+
+Risks / edge cases:
+
+- The path is relative to the process working directory.
+- If the server is started from a different directory, template loading may fail.
+
+### Code block: PDF render
+
+```python
+pdf_bytes = HTML(string=html_content).write_pdf()
+```
+
+What it does: converts HTML into PDF bytes.
+
+Network impact: none.
+
+Filesystem impact: reads template only; does not write a file.
+
+Output: `bytes`.
+
+What would break if removed: export route could build data but not return a PDF.
 
 ## `app/services/event_processing_service.py`
 
@@ -3289,6 +3755,52 @@ Fields:
 
 Mismatch note: event processing writes `kafka_consumed_at`; model has `consumed_at`. Since the model is not enforced, runtime still works, but documentation/schema alignment is imperfect.
 
+## `app/models/export_models.py`
+
+### Purpose
+
+Defines the report-specific DTOs used by `PDFExportService` and the Jinja2 template.
+
+These models are not REST response models. They are internal data-transfer shapes for the export pipeline:
+
+```text
+Mongo execution/events -> ExportExecutionDTO/ExportEventDTO -> Jinja2 template -> WeasyPrint PDF
+```
+
+### `ExportEventDTO`
+
+Fields:
+
+- `event_type: str`: raw backend/Kafka event type.
+- `normalized_event_type: str`: normalized event name used by middleware/frontend.
+- `status: str`: execution status associated with the event.
+- `summary: str`: human-readable summary from the persisted event.
+- `timestamp: str`: event timestamp rendered in the report timeline.
+- `tool_name: Optional[str]`: tool name, shown only when present.
+- `raw_payload_excerpt: Optional[Any]`: raw payload included only when `include_raw=true`.
+
+Why it exists: the PDF template needs a clean, predictable event shape rather than direct MongoDB documents.
+
+### `ExportExecutionDTO`
+
+Fields:
+
+- `soeid: str`: report owner/requesting user.
+- `session_id: str`: conversation ID.
+- `correlation_id: str`: execution/run ID.
+- `status: str`: current execution status.
+- `request_context: str`: original prompt/request text.
+- `started_at: Optional[str]`: execution creation timestamp.
+- `completed_at: Optional[str]`: terminal timestamp when available.
+- `latest_event_type: Optional[str]`: most recent raw event type stored on execution.
+- `events: List[ExportEventDTO] = []`: timeline events.
+- `final_response: Optional[str]`: extracted final answer or completed fallback text.
+- `error_details: Optional[str]`: extracted failure reason for failed runs.
+
+Why it exists: it is the single object rendered by `execution_report.html`.
+
+Risk: `events` uses a mutable list default. Pydantic v2 handles model defaults more safely than plain dataclasses, but `Field(default_factory=list)` would still make the intent clearer.
+
 ## `app/models/kafka_events.py`
 
 ### Purpose
@@ -3456,6 +3968,60 @@ Fields:
 - `type = "heartbeat"`
 - `correlation_id`
 - `timestamp`
+
+## `app/templates/execution_report.html`
+
+### Purpose
+
+HTML/CSS report template used by `PDFExportService.generate_pdf`.
+
+It is rendered with:
+
+```python
+template.render(report=dto.model_dump())
+```
+
+Then WeasyPrint converts the rendered HTML string into PDF bytes.
+
+### Major template sections
+
+Metadata block:
+
+- requested-by SOEID
+- session ID
+- correlation ID
+- status
+- started timestamp
+- completed timestamp when present
+
+User request block:
+
+- renders `report.request_context`
+
+Timeline block:
+
+- loops over `report.events`
+- renders timestamp, summary, raw event type, optional tool name
+- colors the timeline dot through `status-{{ event.status }}`
+- optionally renders raw payload excerpt with Jinja's `pprint` filter
+
+Final response block:
+
+- rendered only when `report.final_response` exists
+
+Error details block:
+
+- rendered only when `report.error_details` exists
+
+### Why it exists
+
+Keeping report layout in a template avoids hardcoding PDF HTML in Python. It also lets designers/developers modify PDF presentation without touching data-fetching logic.
+
+### Risks / edge cases
+
+- Raw payload excerpts can expose sensitive backend data if `include_raw=true`.
+- Template path resolution depends on the app running from the repository root or another working directory where `app/templates` is valid.
+- The template renders stored `request_context`; because that may contain user-provided sensitive content, access must stay ownership-gated.
 
 ## `app/utils/audit_logger.py`
 
@@ -3806,6 +4372,21 @@ This section lists every function/method in the runtime codebase with call relat
 - DB impact: Mongo ping.
 - Why needed: readiness/dependency health.
 
+### `export_execution_pdf(request, correlation_id, x_soeid, include_timestamps, include_raw, download)`
+
+- Defined in: `app/api/export_routes.py`.
+- Called by: `GET /api/v1/chat/export/pdf/{correlation_id}`.
+- Calls: `PDFExportService.generate_pdf`, `Response`, `HTTPException`.
+- Inputs: request object, path correlation ID, required `X-SOEID` header, query flags.
+- Output: raw PDF `Response`.
+- Side effects: logs denied/missing exports and rendering errors.
+- DB impact: through PDF service, reads `recon` and `events`.
+- Network impact: none.
+- Errors: `404` for missing/unauthorized, `500` for PDF engine or unexpected build failures.
+- Why needed: lets frontend download a durable execution report.
+- If removed: users can still view status/history but cannot export a printable report.
+- Simple English: "Take a run ID and user header, ask the service for PDF bytes, then return those bytes with browser-friendly PDF headers."
+
 ## Service functions
 
 ### `ChatExecutionService.execute(request)`
@@ -3852,6 +4433,37 @@ This section lists every function/method in the runtime codebase with call relat
 - DB impact: reads sessions/recon/events.
 - Errors: `SessionNotFoundError`.
 - Why needed: conversation source-of-truth API.
+
+### `PDFExportService.build_export_dto(correlation_id, soeid, include_raw=False)`
+
+- Defined in: `app/services/pdf_export_service.py`.
+- Called by: `PDFExportService.generate_pdf`; tests call it directly.
+- Calls: `ExecutionsRepository.get_execution_by_soeid`, `EventsRepository.get_events_by_correlation`, `ExportEventDTO`, `ExportExecutionDTO`, `json.dumps`.
+- Inputs: correlation ID, SOEID, include-raw flag.
+- Output: `ExportExecutionDTO` or `None`.
+- Side effects: none besides repository reads.
+- DB impact: reads `recon` with ownership and reads `events` by correlation ID.
+- Network impact: none.
+- Errors: repository errors propagate.
+- Why needed: separates report data assembly from PDF rendering.
+- If removed: PDF generation would have to work directly with raw Mongo documents and template logic would become brittle.
+- Simple English: "Load the execution and its events, shape them into a clean report object, and extract final answer/error summary."
+
+### `PDFExportService.generate_pdf(correlation_id, soeid, include_raw=False)`
+
+- Defined in: `app/services/pdf_export_service.py`.
+- Called by: `export_execution_pdf`.
+- Calls: `PDFExportService.build_export_dto`, Jinja2 `Environment`, `FileSystemLoader`, template `render`, WeasyPrint `HTML.write_pdf`.
+- Inputs: correlation ID, SOEID, include-raw flag.
+- Output: PDF bytes or `None`.
+- Side effects: logs successful report generation.
+- DB impact: through `build_export_dto`.
+- Network impact: none.
+- Filesystem impact: reads `app/templates/execution_report.html`.
+- Errors: `RuntimeError` if WeasyPrint Python import was unavailable; template/native rendering errors propagate.
+- Why needed: converts durable execution history into a binary PDF response.
+- If removed: export route could not produce a PDF.
+- Simple English: "Build the report data, render HTML from a template, and ask WeasyPrint to turn it into PDF bytes."
 
 ### `EventProcessingService.process_kafka_event(raw_event, correlation_id, kafka_metadata=None)`
 
@@ -4655,6 +5267,103 @@ Must find execution by `correlation_id + soeid`.
 4. Kafka events later trigger broadcasts.
 5. Terminal event closes stream.
 
+## `GET /api/v1/chat/export/pdf/{correlation_id}`
+
+### Request
+
+Path:
+
+```text
+correlation_id
+```
+
+Required header:
+
+```text
+X-SOEID
+```
+
+Query parameters:
+
+- `include_timestamps`: default `true`; currently retained for spec alignment and not passed into service logic.
+- `include_raw`: default `false`; includes raw event payload excerpts in the PDF timeline DTO/template.
+- `download`: default `true`; selects attachment vs inline content disposition.
+
+### Response model
+
+No Pydantic response model. Returns a raw `fastapi.responses.Response` containing PDF bytes.
+
+Headers:
+
+```text
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="agentic_execution_{correlation_id}.pdf"
+```
+
+or:
+
+```text
+Content-Disposition: inline; filename="agentic_execution_{correlation_id}.pdf"
+```
+
+### Auth rules
+
+Requires `X-SOEID` header directly through `Header(...)`.
+
+Unlike the other chat REST endpoints, it does not use `get_current_user`, so there is no `soeid` query fallback.
+
+### Ownership rules
+
+`PDFExportService.build_export_dto` calls:
+
+```python
+ExecutionsRepository.get_execution_by_soeid(correlation_id, soeid)
+```
+
+If no execution is found for that user, the service returns `None` and the route raises `404`.
+
+### Service called
+
+`PDFExportService.generate_pdf`.
+
+### DB queries
+
+- `recon.find_one({"soeid": soeid, "correlation_id": correlation_id})`
+- `events.find({"correlation_id": correlation_id}).sort("timestamp", 1)`
+
+### Rendering flow
+
+```text
+export route
+ -> PDFExportService.generate_pdf
+ -> PDFExportService.build_export_dto
+ -> ExecutionsRepository.get_execution_by_soeid
+ -> EventsRepository.get_events_by_correlation
+ -> ExportExecutionDTO / ExportEventDTO
+ -> Jinja2 execution_report.html
+ -> WeasyPrint HTML.write_pdf()
+ -> Response(application/pdf)
+```
+
+### Error cases
+
+- missing `X-SOEID` -> FastAPI validation error
+- wrong owner or missing execution -> `404`
+- WeasyPrint unavailable at runtime -> `500`
+- template/rendering/unexpected errors -> `500`
+- local environment missing native WeasyPrint libraries can fail earlier, at import/test collection time
+
+### Example flow
+
+1. User clicks "Download PDF".
+2. Frontend calls endpoint with `X-SOEID`.
+3. Service verifies execution ownership.
+4. Service loads event timeline.
+5. Service extracts final response or error details.
+6. Template renders HTML report.
+7. WeasyPrint converts HTML to PDF.
+8. Browser downloads or opens the PDF based on `download`.
+
 ## `GET /health/live`
 
 No auth. Returns `{"status": "ok"}`.
@@ -5122,6 +5831,40 @@ Top-level history response.
 
 Health endpoint contracts.
 
+## Export DTO models
+
+### `ExportEventDTO`
+
+- `event_type`: raw event type from Mongo event document.
+- `normalized_event_type`: frontend/middleware normalized event type.
+- `status`: status stored with the event.
+- `summary`: human-readable event summary.
+- `timestamp`: event timestamp shown in the timeline.
+- `tool_name`: optional tool name.
+- `raw_payload_excerpt`: optional raw payload included only when the export request uses `include_raw=true`.
+
+Populated by: `PDFExportService.build_export_dto`.
+
+Consumed by: `app/templates/execution_report.html`.
+
+### `ExportExecutionDTO`
+
+- `soeid`: owner/requesting user.
+- `session_id`: conversation ID.
+- `correlation_id`: execution ID.
+- `status`: current execution status from `recon`.
+- `request_context`: original prompt from `recon`.
+- `started_at`: execution `created_at`.
+- `completed_at`: execution `completed_at`.
+- `latest_event_type`: latest raw event stored on execution.
+- `events`: list of `ExportEventDTO`.
+- `final_response`: extracted success response text or completed fallback.
+- `error_details`: extracted first failure reason.
+
+Populated by: `PDFExportService.build_export_dto`.
+
+Consumed by: Jinja2 report template before WeasyPrint rendering.
+
 ## DB models
 
 These mirror intended MongoDB shapes but are not enforced by repositories at write time.
@@ -5166,6 +5909,8 @@ API layer
   health_routes
     -> mongo.get_database
     -> lifespan.get_kafka_consumer
+  export_routes
+    -> PDFExportService
 
 Service layer
   ChatExecutionService
@@ -5189,6 +5934,12 @@ Service layer
   WebSocketManager
     -> websocket message models
     -> metrics
+  PDFExportService
+    -> ExecutionsRepository
+    -> EventsRepository
+    -> export DTO models
+    -> Jinja2 template
+    -> WeasyPrint
 
 Client layer
   TokenClient
@@ -5226,6 +5977,7 @@ Runtime entry points:
 - `get_status`
 - `get_history`
 - `websocket_progress`
+- `export_execution_pdf`
 - `health_live`
 - `health_ready`
 - `KafkaEventConsumer.start` as background task
@@ -5302,6 +6054,14 @@ WebSocket:
 - disconnect -> cleanup
 - unexpected route error -> log warning and cleanup
 
+PDF export:
+
+- missing/wrong-owner execution -> `404`
+- `PDFExportService.generate_pdf` returning `None` -> `404`
+- `RuntimeError` during PDF generation -> `500` with `"Cannot generate PDF on this server."`
+- other render/build errors -> `500` with `"An error occurred building the export."`
+- native WeasyPrint library failures can occur at import time and prevent app/test collection before route-level handlers run
+
 ## Status transitions on failure
 
 Failures come from Kafka events:
@@ -5341,12 +6101,15 @@ Enforced by querying MongoDB with identity:
 - execution status: `soeid + correlation_id`
 - session history: `soeid + session_id`
 - WebSocket connect: `soeid + correlation_id`
+- PDF export: `soeid + correlation_id`
 
 ## X-SOEID usage
 
 `X-SOEID` is used as the authenticated principal in REST.
 
 The execute route overwrites body `soeid` with header/query identity. This prevents body spoofing once identity has been established.
+
+The PDF export route directly requires `X-SOEID` through `Header(...)`. It does not use the shared `get_current_user` dependency and therefore does not accept the `soeid` query fallback.
 
 ## Query parameter usage for WebSocket
 
@@ -5400,6 +6163,7 @@ Nested body fields are whitelisted; everything else becomes `***`.
 3. WebSocket query identity is not cryptographically authenticated by this code.
 4. `/metrics` and `/health` are unauthenticated in code.
 5. `request_context` is stored in MongoDB in plain form.
+6. PDF export renders `request_context`, final response, error details, and optionally raw payload excerpts; keep this endpoint ownership-gated and be cautious with `include_raw=true`.
 
 ---
 
@@ -5475,13 +6239,21 @@ venv/bin/python -m pip install -r requirements.txt
 venv/bin/python -m pytest tests/ -q
 ```
 
-Result:
+Current result after PDF export dependencies were added:
 
 ```text
-29 passed in 6.56s
+tests/test_export_service.py collection fails locally because WeasyPrint cannot load native GObject/Pango libraries:
+OSError: cannot load library 'libgobject-2.0-0'
 ```
 
-Initial rerun note:
+Interpretation:
+
+- Python package dependencies install successfully after allowing network access.
+- The Dockerfile now installs Linux libraries needed by WeasyPrint (`libcairo2`, `libpango-1.0-0`, `libpangocairo-1.0-0`, `libgdk-pixbuf2.0-0`, `libffi-dev`, `shared-mime-info`).
+- The local macOS shell still needs equivalent native libraries before tests importing `app.main` can collect.
+- The import guard in `pdf_export_service.py` catches `ImportError`, but this failure is an `OSError` raised by WeasyPrint while loading native libraries.
+
+Previous rerun note:
 
 After dependency installation, the first full run executed the suite but failed two token-client tests. Both failures came from mocks in `tests/test_token_client.py` that configured `response.json()` but left `response.text` as a `MagicMock`. The production token client checks `resp.text.strip()` first so it can support raw JWT token responses. Real JSON HTTP responses have string `.text`, so the tests now set `.text` to matching JSON strings.
 
@@ -5601,6 +6373,26 @@ Confidence: validates token cache behavior.
 
 Coverage gap: raw JWT response path and unexpected format errors are not tested.
 
+## `tests/test_export_service.py`
+
+Tests:
+
+- `build_export_dto` successfully builds a report DTO with events and final response extraction.
+- failed execution DTOs extract `error_details`.
+- missing or unauthorized execution returns `None`.
+- export route returns 404 when service returns no PDF bytes.
+- successful route returns `application/pdf`, attachment disposition, and expected bytes.
+- `download=false` returns inline content disposition.
+
+Mocking:
+
+- repository calls for service-level DTO tests
+- `PDFExportService.generate_pdf` for route-level tests
+
+Confidence: validates the export service's Mongo-to-DTO shaping and route response headers.
+
+Local collection caveat: because the test imports `app.main`, it imports `export_routes`, which imports `pdf_export_service`, which imports WeasyPrint. If native WeasyPrint libraries are missing locally, this test module can fail during collection before mocks are applied.
+
 ## `tests/test_websocket_manager.py`
 
 Tests:
@@ -5640,7 +6432,11 @@ Coverage gap: heartbeat loop behavior and metrics are not deeply tested.
 11. `app/models/kafka_events.py`
 12. `app/services/websocket_manager.py`
 13. `app/services/status_service.py`
-14. tests
+14. `app/api/export_routes.py`
+15. `app/services/pdf_export_service.py`
+16. `app/models/export_models.py`
+17. `app/templates/execution_report.html`
+18. tests
 
 ## Easy misunderstandings
 
@@ -5651,6 +6447,9 @@ Coverage gap: heartbeat loop behavior and metrics are not deeply tested.
 - Kafka commit happens after persistence, not after broadcast reliability.
 - Body `soeid` is required by the model but overwritten by route identity.
 - `db_models.py` is not currently enforced in repositories.
+- PDF export is Mongo-backed like status/history; it does not use WebSocket history.
+- PDF export requires native WeasyPrint libraries in addition to Python packages.
+- Export route identity handling is header-only `X-SOEID`, unlike routes using `get_current_user`.
 
 ## Hidden assumptions
 
@@ -5691,6 +6490,13 @@ Coverage gap: heartbeat loop behavior and metrics are not deeply tested.
   1. update `EXECUTION_STATUS_MAP`
   2. update WebSocket manager terminal status logic if new terminal statuses exist
   3. update tests
+
+- To change PDF export:
+  1. update `ExportExecutionDTO` / `ExportEventDTO` if report data shape changes
+  2. update `PDFExportService.build_export_dto` for Mongo-to-report mapping
+  3. update `app/templates/execution_report.html` for layout
+  4. update `tests/test_export_service.py`
+  5. verify WeasyPrint native dependencies in Docker and local dev docs
 
 - To add real auth:
   1. replace `get_current_user`
@@ -5753,6 +6559,14 @@ The processor raises, the consumer logs, and the Kafka offset is not committed. 
 
 The `event` message carries rich timeline details. The `status` message gives the frontend a simple current-state update. This lets UI components update independently.
 
+## Why is PDF export built from MongoDB instead of WebSocket?
+
+MongoDB is the durable source of truth. WebSocket is transient live delivery and may miss events during disconnects or refreshes. The PDF export needs a complete historical report, so it reads `recon` and `events` from MongoDB through the same ownership boundary as status/history.
+
+## Why does PDF export need system packages?
+
+The Python package `weasyprint` renders HTML/CSS into PDF using native text and graphics libraries such as Cairo and Pango. The Dockerfile installs those Linux libraries. Local machines need equivalent native libraries or app import/test collection can fail when WeasyPrint loads.
+
 ## What would you improve first?
 
 Strong candidates:
@@ -5763,6 +6577,7 @@ Strong candidates:
 4. Align tests with current event status/summary mappings.
 5. Decide whether unknown execution Kafka events should be retried instead of committed.
 6. Use Pydantic DB models for write validation or remove/rename mismatched fields.
+7. Make the WeasyPrint import guard catch native-library load failures or lazy-load WeasyPrint inside `generate_pdf` so non-export routes/tests can import without local PDF system libraries.
 
 ---
 
@@ -5770,7 +6585,7 @@ Strong candidates:
 
 ## 30 seconds
 
-This is a FastAPI middleware between a chat frontend and an asynchronous backend agent executor. The frontend starts a run through REST, the middleware fetches a token and calls the backend, stores the run in MongoDB, then consumes backend progress events from Kafka. Each event is normalized, persisted idempotently, updates the execution status, and is streamed live to the frontend over WebSocket. MongoDB is the source of truth, while WebSocket is only live delivery.
+This is a FastAPI middleware between a chat frontend and an asynchronous backend agent executor. The frontend starts a run through REST, the middleware fetches a token and calls the backend, stores the run in MongoDB, then consumes backend progress events from Kafka. Each event is normalized, persisted idempotently, updates the execution status, and is streamed live to the frontend over WebSocket. MongoDB is the source of truth, while WebSocket is only live delivery; the same MongoDB history can also be rendered into a PDF execution report.
 
 ## 2 minutes
 
@@ -5778,7 +6593,7 @@ The system has two halves. The synchronous half starts work: `POST /api/v1/chat/
 
 The asynchronous half tracks work: a Kafka consumer listens for backend events using manual commits. It parses each message, filters unsupported events, requires `x_correlation_id`, looks up the execution, maps raw events to normalized event types and statuses, inserts the event into MongoDB using a unique idempotency key, updates the current execution status in `recon`, broadcasts to connected WebSocket clients, and commits the Kafka offset only after persistence succeeds.
 
-For recovery, the frontend uses `/status/{correlation_id}` for one run or `/history/{session_id}` for a conversation. Ownership is enforced using `soeid`, with REST returning 404 for unauthorized IDs and WebSocket closing with 1008.
+For recovery, the frontend uses `/status/{correlation_id}` for one run or `/history/{session_id}` for a conversation. For reporting, it calls `/api/v1/chat/export/pdf/{correlation_id}` with `X-SOEID` to generate a PDF from the persisted execution and events. Ownership is enforced using `soeid`, with REST returning 404 for unauthorized IDs and WebSocket closing with 1008.
 
 ## 5 minutes
 
@@ -5786,7 +6601,7 @@ At startup, `app/main.py` creates a FastAPI app with CORS, SlowAPI rate limiting
 
 The execute route is intentionally thin. It uses `get_current_user` to extract SOEID, overwrites the body SOEID, and delegates to `ChatExecutionService`. That service generates a new correlation ID, reuses or creates a session ID, gets a token from `TokenClient`, calls the backend with `BackendExecutorClient`, stores the session and initial execution in MongoDB, records metrics/audit, and returns the IDs and WebSocket URL.
 
-MongoDB has three collections. `sessions` stores conversation ownership and metadata. `recon` stores one execution per correlation ID and holds current status. `events` stores every normalized Kafka event, with a unique `event_idempotency_key` to suppress duplicates. Status and history endpoints read these collections and enforce ownership by querying with SOEID.
+MongoDB has three collections. `sessions` stores conversation ownership and metadata. `recon` stores one execution per correlation ID and holds current status. `events` stores every normalized Kafka event, with a unique `event_idempotency_key` to suppress duplicates. Status, history, and PDF export endpoints read these collections and enforce ownership by querying with SOEID.
 
 Kafka is the bridge from backend async execution to middleware state. The consumer disables auto-commit. It commits poison or irrelevant messages after skipping them, but for valid execution events it commits only after `EventProcessingService` has inserted the event and updated the execution. If MongoDB fails, it does not commit, so Kafka can redeliver. If WebSocket broadcast fails, it still commits because MongoDB already has the truth.
 

@@ -10,15 +10,18 @@ venv/bin/python -m pip install -r requirements.txt
 venv/bin/python -m pytest tests/ -q
 ```
 
-Latest verified result:
+Current local result after PDF export dependencies were added:
 
 ```text
-29 passed in 6.56s
+Collection stops in tests/test_export_service.py because local macOS cannot load WeasyPrint native GObject/Pango libraries:
+OSError: cannot load library 'libgobject-2.0-0'
 ```
+
+The Dockerfile installs the Linux PDF libraries. Local dev needs equivalent native packages before the full suite can collect.
 
 ## One-Sentence System Summary
 
-FastAPI middleware accepts frontend chat executions, starts backend agent work, persists execution state in MongoDB, consumes backend Kafka progress events, normalizes them, updates status, and streams live updates over WebSocket.
+FastAPI middleware accepts frontend chat executions, starts backend agent work, persists execution state in MongoDB, consumes backend Kafka progress events, normalizes them, updates status, streams live updates over WebSocket, and can export a Mongo-backed execution report as PDF.
 
 ## Primary Entry Points
 
@@ -29,6 +32,7 @@ FastAPI middleware accepts frontend chat executions, starts backend agent work, 
 | Execute REST | `app/api/chat_routes.py` | `ChatExecutionService.execute` |
 | Status REST | `app/api/chat_routes.py` | `StatusService.get_execution_status` |
 | History REST | `app/api/chat_routes.py` | `StatusService.get_session_history` |
+| PDF export REST | `app/api/export_routes.py` | `PDFExportService.generate_pdf` |
 | Progress WS | `app/api/websocket_routes.py` | `ExecutionsRepository`, `WebSocketManager` |
 | Kafka loop | `app/clients/kafka_consumer.py` | `EventProcessingService`, `WebSocketManager` |
 
@@ -38,7 +42,7 @@ FastAPI middleware accepts frontend chat executions, starts backend agent work, 
 |---|---|---|---|
 | `session_id` | Conversation/thread ID | client or `generate_session_id()` | history, grouping executions |
 | `correlation_id` | One execution/run ID | `generate_correlation_id()` | backend call, Kafka event link, status, WebSocket |
-| `soeid` | User identity | `get_current_user()` from `X-SOEID` or query | ownership checks |
+| `soeid` | User identity | `get_current_user()` from `X-SOEID` or query; export route uses `X-SOEID` directly | ownership checks |
 
 Rule of thumb:
 
@@ -93,6 +97,22 @@ GET /api/v1/chat/history/{session_id}
  -> ChatHistoryResponse
 ```
 
+### PDF Export
+
+```text
+GET /api/v1/chat/export/pdf/{correlation_id}?download=true
+ -> export_routes.export_execution_pdf
+ -> read X-SOEID header
+ -> PDFExportService.generate_pdf
+ -> PDFExportService.build_export_dto
+ -> ExecutionsRepository.get_execution_by_soeid
+ -> EventsRepository.get_events_by_correlation
+ -> ExportExecutionDTO / ExportEventDTO
+ -> Jinja2 execution_report.html
+ -> WeasyPrint HTML.write_pdf()
+ -> Response(application/pdf)
+```
+
 ### Kafka Event
 
 ```text
@@ -131,6 +151,16 @@ WS /ws/v1/chat/progress/{correlation_id}?soeid=USER
 | `sessions` | `sessions_repository.py` | conversation ownership and metadata | unique `session_id`, `(soeid, session_id)` |
 | `recon` | `executions_repository.py` | one execution per `correlation_id` | unique `correlation_id`, `session_id`, `(soeid, correlation_id)` |
 | `events` | `events_repository.py` | append-only normalized event timeline | `correlation_id`, `session_id`, `timestamp`, unique `event_idempotency_key` |
+
+## Export Files
+
+| File | Purpose |
+|---|---|
+| `app/api/export_routes.py` | PDF endpoint, response headers, route errors |
+| `app/services/pdf_export_service.py` | ownership-safe export DTO building and PDF rendering |
+| `app/models/export_models.py` | `ExportExecutionDTO`, `ExportEventDTO` |
+| `app/templates/execution_report.html` | Jinja2 HTML report template |
+| `tests/test_export_service.py` | DTO extraction and export route header tests |
 
 ## Status Map
 
@@ -190,12 +220,19 @@ WebSocket identity:
 soeid query parameter
 ```
 
+PDF export identity:
+
+```text
+X-SOEID header only
+```
+
 Ownership queries:
 
 ```text
 status:  recon.find_one({"soeid": soeid, "correlation_id": correlation_id})
 history: sessions.find_one({"soeid": soeid, "session_id": session_id})
 ws:      recon.find_one({"soeid": soeid, "correlation_id": correlation_id})
+export:  recon.find_one({"soeid": soeid, "correlation_id": correlation_id})
 ```
 
 Failure behavior:
@@ -204,6 +241,7 @@ Failure behavior:
 REST unauthorized/missing resource -> 404
 WebSocket unauthorized/throttled -> close code 1008
 missing identity -> 401
+PDF export unauthorized/missing execution -> 404
 ```
 
 ## WebSocket Message Types
@@ -243,6 +281,28 @@ WebSocket does not replay history. Reconnect gives current status only; use /sta
 | Kafka | `kafka_consumer.py` | confluent-kafka | consume async progress |
 | MongoDB | `mongo.py` + repositories | Motor async driver | source of truth |
 | Prometheus | `metrics_service.py` + `/metrics` | metrics scrape | observability |
+| PDF renderer | `pdf_export_service.py` | Jinja2 + WeasyPrint | HTML report to PDF bytes |
+
+## PDF Export DTOs
+
+```text
+ExportExecutionDTO:
+  soeid, session_id, correlation_id, status
+  request_context, started_at, completed_at, latest_event_type
+  events, final_response, error_details
+
+ExportEventDTO:
+  event_type, normalized_event_type, status, summary
+  timestamp, tool_name, raw_payload_excerpt
+```
+
+PDF response headers:
+
+```text
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="agentic_execution_{correlation_id}.pdf"
+Content-Disposition: inline; filename="agentic_execution_{correlation_id}.pdf" when download=false
+```
 
 ## Common Change Points
 
@@ -273,6 +333,16 @@ Update WebSocketManager.broadcast terminal status check if new terminal values e
 Update docs/tests/frontend expectations
 ```
 
+Change PDF export:
+
+```text
+Update ExportExecutionDTO / ExportEventDTO if report data changes
+Update PDFExportService.build_export_dto for Mongo-to-report mapping
+Update app/templates/execution_report.html for layout
+Update tests/test_export_service.py
+Verify WeasyPrint Python and native dependencies
+```
+
 ## Sharp Edges
 
 - `ChatExecuteRequest.soeid` is required by the model even though the route overwrites it from identity.
@@ -281,4 +351,5 @@ Update docs/tests/frontend expectations
 - `db_models.py` documents shapes but repositories do not enforce those Pydantic models.
 - `WebSocketManager` is process-local; multiple Gunicorn workers do not share socket state.
 - Kafka processing schedules message handling concurrently, so think carefully about ordering if adding stricter sequencing.
-
+- PDF export imports WeasyPrint at module import time; missing native libraries can break app import/test collection before route-level error handling runs.
+- `include_raw=true` in PDF export can place raw event payloads in the report, so treat it as sensitive.

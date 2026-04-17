@@ -29,6 +29,7 @@ The Agentic Middleware sits between the frontend chat UI and the backend asynchr
 | **Progress Stream** | WebSocket | `WS /ws/v1/chat/progress/{correlation_id}` | Immediately after `/execute` to receive live progress events. |
 | **Execution Status** | REST | `GET /api/v1/chat/status/{correlation_id}` | Refresh/sync check for a single execution. |
 | **Conversation History** | REST | `GET /api/v1/chat/history/{session_id}` | On page load or conversation resume to rebuild the chat thread. |
+| **PDF Export** | REST | `GET /api/v1/chat/export/pdf/{correlation_id}` | To download a full printable timeline of a specific run. |
 
 ### Identifiers to preserve
 - **`session_id`**: persists for the life of a conversation thread. Reuse across consecutive turns.
@@ -245,6 +246,24 @@ X-SOEID: <user-id>
 - Use to rebuild previous conversations from persisted state
 - Do not rebuild history from WebSocket messages
 - One execution should render as one user turn + one backend run in the conversation
+
+---
+
+### 5.4 GET `/api/v1/chat/export/pdf/{correlation_id}`
+Download a full PDF report of an execution's lifecycle, including the request context, internal agent logs/timeline, and final output.
+
+#### Request headers
+```http
+X-SOEID: <user-id>
+```
+
+#### Query params
+- `download=true` (Forces browser attachment download hook, default is true)
+
+#### Frontend behavior
+- The frontend should show a **"Download PDF"** button next to or inside executions.
+- The button should be available at least for terminal runs (`completed` or `failed`).
+- Hitting this endpoint returns `Content-Type: application/pdf`, the browser should download the returned PDF file directly.
 
 ---
 

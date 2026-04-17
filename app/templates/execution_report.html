@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Execution Report</title>
+    <style>
+        body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 20px; color: #333; font-size: 14px; }
+        h1 { color: #0056b3; border-bottom: 2px solid #0056b3; padding-bottom: 5px; font-size: 24px; }
+        h2 { color: #0056b3; margin-top: 25px; font-size: 18px; }
+        .metadata { margin-bottom: 20px; background: #f8f9fa; padding: 15px; border-radius: 5px; border: 1px solid #ddd; }
+        .metadata div { margin-bottom: 8px; }
+        .metadata div strong { display: inline-block; width: 140px; color: #555; }
+        .timeline { margin-top: 15px; border-left: 3px solid #dee2e6; padding-left: 20px; margin-left: 10px; }
+        .event { margin-bottom: 20px; position: relative; }
+        .event-dot { position: absolute; left: -27px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: #007bff; border: 2px solid white; box-shadow: 0 0 0 1px #dee2e6; }
+        .event-dot.status-failed { background: #dc3545; }
+        .event-dot.status-completed { background: #28a745; }
+        .event-time { font-size: 0.85em; color: #6c757d; margin-bottom: 4px; font-family: monospace; }
+        .event-summary { font-weight: 600; font-size: 1.05em; margin-bottom: 4px; }
+        .event-details { font-size: 0.9em; color: #495057; background: #f8f9fa; padding: 8px; border-radius: 4px; border: 1px solid #e9ecef; }
+        code { color: #d63384; font-size: 0.9em; }
+        .raw-data { background: #212529; color: #f8f9fa; padding: 12px; font-family: monospace; font-size: 0.8em; overflow-x: auto; margin-top: 10px; border-radius: 4px; white-space: pre-wrap; }
+        .final-response { background: #f0fdf4; border: 1px solid #86efac; padding: 15px; border-radius: 5px; margin-top: 20px; color: #166534; white-space: pre-wrap; }
+        .error-details { background: #fef2f2; border: 1px solid #fca5a5; padding: 15px; border-radius: 5px; margin-top: 20px; color: #991b1b; white-space: pre-wrap; }
+        .request-context { background: #f8fafc; padding: 15px; border-radius: 5px; border: 1px solid #cbd5e1; font-size: 1.1em; color: #0f172a; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>Agentic Execution Report</h1>
+    
+    <div class="metadata">
+        <div><strong>Requested By (SOEID):</strong> {{ report.soeid }}</div>
+        <div><strong>Session ID:</strong> {{ report.session_id }}</div>
+        <div><strong>Correlation ID:</strong> {{ report.correlation_id }}</div>
+        <div><strong>Status:</strong> <span style="text-transform: uppercase; font-weight: bold;">{{ report.status }}</span></div>
+        <div><strong>Started At:</strong> {{ report.started_at }}</div>
+        {% if report.completed_at %}
+        <div><strong>Completed At:</strong> {{ report.completed_at }}</div>
+        {% endif %}
+    </div>
+
+    <h2>User Request</h2>
+    <div class="request-context">
+        {{ report.request_context }}
+    </div>
+
+    <h2>Execution Timeline</h2>
+    <div class="timeline">
+        {% for event in report.events %}
+        <div class="event">
+            <div class="event-dot status-{{ event.status }}"></div>
+            <div class="event-time">{{ event.timestamp }}</div>
+            <div class="event-summary">{{ event.summary }}</div>
+            <div class="event-details">
+                Type: <code>{{ event.event_type }}</code>
+                {% if event.tool_name %}<br>Tool: <strong>{{ event.tool_name }}</strong>{% endif %}
+            </div>
+            {% if event.raw_payload_excerpt %}
+            <div class="raw-data">
+                {{ event.raw_payload_excerpt | pprint }}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    {% if report.final_response %}
+    <h2>Final Response</h2>
+    <div class="final-response">
+        {{ report.final_response }}
+    </div>
+    {% endif %}
+
+    {% if report.error_details %}
+    <h2>Error Details</h2>
+    <div class="error-details">
+        {{ report.error_details }}
+    </div>
+    {% endif %}
+</body>
+</html>

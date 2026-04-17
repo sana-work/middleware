@@ -15,6 +15,7 @@ Frontend
  -> FastAPI middleware
  -> MongoDB source of truth
  -> WebSocket live updates
+ -> optional PDF report from MongoDB history
 ```
 
 ## Major Components
@@ -23,12 +24,14 @@ Frontend
 |---|---|---|
 | App composition | `app/main.py`, `app/core/lifespan.py` | create FastAPI app, middleware, metrics, startup/shutdown |
 | REST API | `app/api/chat_routes.py` | execute, status, history |
+| Export API | `app/api/export_routes.py` | PDF execution report |
 | WebSocket API | `app/api/websocket_routes.py` | live progress stream |
 | Health | `app/api/health_routes.py` | liveness/readiness |
-| Services | `app/services/*.py` | orchestration, status building, event processing, WebSocket fan-out |
+| Services | `app/services/*.py` | orchestration, status building, event processing, PDF rendering, WebSocket fan-out |
 | Clients | `app/clients/*.py` | token service, backend executor, Kafka |
 | Persistence | `app/db/*.py` | Mongo connection, indexes, repositories |
-| Models | `app/models/*.py` | API, DB, Kafka, and WebSocket contracts |
+| Models | `app/models/*.py` | API, DB, Kafka, WebSocket, and export DTO contracts |
+| Templates | `app/templates/execution_report.html` | HTML/Jinja2 report template rendered to PDF |
 | Utilities | `app/utils/*.py` | IDs, timestamps, retries, audit logging |
 
 ## Source Of Truth
@@ -42,6 +45,8 @@ events   = append-only event timeline
 ```
 
 WebSocket is live delivery only. Kafka is event transport only. The frontend should recover from Mongo-backed REST endpoints.
+
+PDF export also uses MongoDB as its source. It rebuilds the report from `recon` and `events`, not from WebSocket messages.
 
 ## Identifier Model
 
@@ -82,6 +87,26 @@ Core chain:
 
 ```text
 route -> service -> token client -> backend client -> session repo -> execution repo -> response
+```
+
+## PDF Export Lifecycle
+
+```text
+1. Frontend calls GET /api/v1/chat/export/pdf/{correlation_id} with X-SOEID.
+2. export_routes reads X-SOEID directly from the header.
+3. PDFExportService.generate_pdf is called.
+4. build_export_dto verifies recon ownership with soeid + correlation_id.
+5. EventsRepository loads the persisted timeline.
+6. ExportExecutionDTO and ExportEventDTO are assembled.
+7. Jinja2 renders app/templates/execution_report.html.
+8. WeasyPrint converts HTML to PDF bytes.
+9. Route returns application/pdf with attachment or inline Content-Disposition.
+```
+
+Core chain:
+
+```text
+export route -> PDFExportService -> recon/events repos -> export DTOs -> Jinja2 template -> WeasyPrint -> PDF response
 ```
 
 ## Kafka Lifecycle
@@ -143,6 +168,9 @@ Ownership checks:
 
 WebSocket:
   ExecutionsRepository.get_execution_by_soeid(correlation_id, soeid)
+
+PDF export:
+  ExecutionsRepository.get_execution_by_soeid(correlation_id, soeid)
 ```
 
 Failure policy:
@@ -151,7 +179,10 @@ Failure policy:
 REST missing identity -> 401
 REST not found or wrong owner -> 404
 WebSocket wrong owner or throttled -> 1008 policy violation
+PDF export wrong owner -> 404
 ```
+
+Note: most REST routes use `get_current_user`, which accepts `X-SOEID` with query fallback. PDF export directly requires `X-SOEID`; it does not use the query fallback.
 
 ## MongoDB Model
 
@@ -208,6 +239,36 @@ kafka metadata
 created_at
 ```
 
+## PDF Export Model
+
+Export DTOs live in `app/models/export_models.py`.
+
+```text
+ExportExecutionDTO:
+  soeid
+  session_id
+  correlation_id
+  status
+  request_context
+  started_at
+  completed_at
+  latest_event_type
+  events
+  final_response
+  error_details
+
+ExportEventDTO:
+  event_type
+  normalized_event_type
+  status
+  summary
+  timestamp
+  tool_name
+  raw_payload_excerpt
+```
+
+`final_response` is extracted from `EXECUTION_FINAL_RESPONSE` or a completed event payload. `error_details` is extracted from the first failed event.
+
 ## Event And Status Maps
 
 | Raw event | Normalized event | Execution status | Summary |
@@ -262,9 +323,27 @@ broadcast failure -> commit -> REST can recover from Mongo
 | Liveness | `/health/live` | process is alive |
 | Readiness | `/health/ready` | Mongo ping, Kafka initialized, token/backend config |
 
+## PDF Runtime Dependencies
+
+Python packages:
+
+```text
+weasyprint
+Jinja2
+```
+
+Native libraries:
+
+```text
+Cairo / Pango / GObject / GDK Pixbuf / libffi / shared MIME info
+```
+
+The Dockerfile installs the Linux libraries. Local macOS test runs can fail during import if equivalent native libraries are missing.
+
 ## Mental Model
 
 The system has three lanes:
+The system has four lanes:
 
 ```text
 Start lane:
@@ -275,7 +354,9 @@ Progress lane:
 
 Recovery lane:
   REST status/history -> Mongo source of truth -> frontend rebuilds state
+
+Export lane:
+  REST PDF export -> Mongo source of truth -> Jinja2 HTML -> WeasyPrint PDF
 ```
 
-If you can explain those three lanes, you can explain the architecture quickly and accurately.
-
+If you can explain those four lanes, you can explain the architecture quickly and accurately.

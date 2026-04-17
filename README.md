@@ -97,6 +97,7 @@ To prevent ID enumeration and protect user data, the middleware enforces a stric
 * `GET /api/v1/chat/status/{correlation_id}?soeid=USER`
 * `GET /api/v1/chat/history/{session_id}?soeid=USER&limit=50&skip=0`
 * `WS /ws/v1/chat/progress/{correlation_id}?soeid=USER`
+* `GET /api/v1/chat/export/pdf/{correlation_id}?download=true` (Export execution report as PDF using X-SOEID auth)
 
 ## Running Tests
 
