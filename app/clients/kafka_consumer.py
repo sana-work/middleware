@@ -149,11 +149,12 @@ class KafkaEventConsumer:
             inner_data = payload["data"]
             if isinstance(inner_data, str):
                 try:
-                    payload = json.loads(inner_data)
+                    inner_payload = json.loads(inner_data)
+                    payload.update(inner_payload) # Merge instead of replace
                 except json.JSONDecodeError:
-                    logger.warning("Failed to decode stringified 'data' field, using top-level payload", offset=offset)
+                    logger.warning("Failed to decode stringified 'data' field", offset=offset)
             elif isinstance(inner_data, dict):
-                payload = inner_data
+                payload.update(inner_data) # Merge instead of replace
 
         # 3. Extract correlation and event identity (handle both x_correlation_id and correlation_id)
         event_type = payload.get("event_type")
