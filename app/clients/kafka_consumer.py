@@ -129,13 +129,22 @@ class KafkaEventConsumer:
         partition = msg.partition()
         offset = msg.offset()
 
-        # 1. Parse JSON safely
+        # 1. Parse JSON safely (Handle potential double-encoding)
         try:
             payload = json.loads(raw_value.decode("utf-8"))
+            
+            # Double-parse if the backend sent a stringified JSON body as the value
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except json.JSONDecodeError:
+                    pass # Not double-encoded, just a plain string
+
             logger.info(
                 "Kafka message received",
                 offset=offset,
-                top_level_keys=list(payload.keys()) if isinstance(payload, dict) else "non-dict"
+                is_dict=isinstance(payload, dict),
+                top_level_keys=list(payload.keys()) if isinstance(payload, dict) else "N/A"
             )
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.error(
