@@ -11,6 +11,7 @@ The middleware acts as a robust broker that:
 5. Normalizes and safely persists all execution state to MongoDB (acting as the system of record)
 6. Broadcasts real-time live progress updates to frontend clients over WebSockets
 7. Exposes REST endpoints to fetch chat status and history (with pagination)
+8. Generates professional-grade PDF and CSV execution reports for audit and traceability (Powered by ReportLab)
 
 * **MongoDB**: Central data store for `sessions`, `recon` (executions), and `events`. Guarantees idempotency via unique keys.
 
@@ -97,7 +98,7 @@ To prevent ID enumeration and protect user data, the middleware enforces a stric
 * `GET /api/v1/chat/status/{correlation_id}?soeid=USER`
 * `GET /api/v1/chat/history/{session_id}?soeid=USER&limit=50&skip=0`
 * `WS /ws/v1/chat/progress/{correlation_id}?soeid=USER`
-* `GET /api/v1/chat/export/pdf/{correlation_id}?download=true` (Export execution report as PDF using X-SOEID auth)
+* `GET /api/v1/chat/export/pdf/{correlation_id}` (Generates standardized execution report with full timeline and outcome)
 
 ## Running Tests
 

@@ -17,24 +17,22 @@ graph TB
     classDef execNode fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#9a3412,font-weight:bold
     classDef eventNode fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#065f46,font-weight:bold
     classDef dbNode fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#065f46,font-weight:bold
-    classDef monitorNode fill:#fef2f2,stroke:#dc2626,stroke-width:2px,color:#991b1b,font-weight:bold
-    classDef logNode fill:#f8fafc,stroke:#475569,stroke-width:2px,color:#334155,font-weight:bold
+    classDef outputNode fill:#fff1f2,stroke:#be123c,stroke-width:2px,color:#9f1239,font-weight:bold
     classDef identityNode fill:#fef2f2,stroke:#dc2626,stroke-width:2px,color:#991b1b,font-weight:bold
 
     %% ── Nodes ──
-    SOEID["🛡️ X-SOEID Gateway\nEnforces ownership on all access"]:::identityNode
+    SOEID["🛡️ X-SOEID Gateway\nEnforces ownership"]:::identityNode
     UI["💬 Frontend Chat UI\nREST calls · WS progress"]:::clientNode
-    TS["🔒 Token Service\nOAuth / Bearer credentials"]:::authNode
+    TS["🔒 Token Service\nOAuth / Bearer"]:::authNode
 
-    MW["⚙️ FastAPI Middleware\nSync UI → Async Execution\nRoutes · WS · Kafka · Audit"]:::mwNode
+    MW["⚙️ FastAPI Middleware\nRoutes · WS · Kafka · Export"]:::mwNode
 
-    BE["🧠 Agent Executor\nAsync task processing"]:::execNode
+    BE["🧠 Agent Executor\nBackend Agent logic"]:::execNode
 
     K[("📡 Kafka Event Bus")]:::eventNode
     MG[("🗄️ MongoDB\nrecon · sessions · events")]:::dbNode
 
-    PROM["📊 Prometheus\nMetrics endpoint"]:::monitorNode
-    AL["📝 Audit Logs\nStructured JSON"]:::logNode
+    PDF["📄 PDF Export\nReportLab Engine"]:::outputNode
 
     %% ── Connections ──
     UI <-->|"REST / WS"| MW
@@ -44,8 +42,8 @@ graph TB
     BE -.->|"async events"| K
     K -.->|"consume"| MW
     MW <-->|"ID & State"| MG
-    MW -.->|"metrics"| PROM
-    MW -.->|"audit"| AL
+    MW -->|"Generate Report"| PDF
+    PDF -->|"Binary Output"| UI
 
     %% ── Identity Boundary ──
     subgraph BOUNDARY ["🔐 Identity Boundary"]
@@ -60,13 +58,14 @@ graph TB
 > **Key Anchors**:
 > - **FastAPI**: Provides high-performance async concurrency for IO-bound Kafka/DB operations.
 > - **Kafka**: Decouples long-running Agent execution from user requesting thread.
-> - **MongoDB**: Serves as the immutable "System of Record" for all historical and active runs.
+> - **MongoDB**: Serves as the "System of Record" for all historical and active runs.
+> - **ReportLab**: High-fidelity PDF engine providing enterprise-ready execution reports.
 
 ---
 
 ## Slide 2: Detailed Component Map
 
-Internal modular structure of the `app/` directory, illustrating separation of concerns between delivery, logic, and persistence.
+Internal modular structure of the `app/` directory, illustrating the new Export service integration.
 
 ```mermaid
 graph TD
@@ -77,11 +76,13 @@ graph TD
 
     subgraph L1 ["🌐 API Layer"]
         CR[chat_routes]:::api
+        EXR[export_routes]:::api
         WR[ws_routes]:::api
     end
 
     subgraph L2 ["⚙️ Service Layer"]
         CES[execution_svc]:::svc
+        PXS[pdf_export_svc]:::svc
         EPS[event_proc_svc]:::svc
         WM[ws_manager]:::svc
     end
@@ -105,6 +106,7 @@ graph TD
 
     %% API to Services
     CR -->|POST| CES
+    EXR -->|GET| PXS
     WR -->|WS| WM
 
     %% Services to Clients
@@ -117,6 +119,8 @@ graph TD
     CES -->|insert| ER
     EPS -->|upsert| EVR
     EPS -->|update| ER
+    PXS -->|aggregate| ER
+    PXS -->|aggregate| EVR
 
     %% Internal Service
     EPS -->|broadcast| WM
@@ -127,21 +131,36 @@ graph TD
     style L4 fill:#f0fdf8,stroke:#059669,stroke-width:2px,stroke-dasharray: 5 5
 ```
 
-> [!NOTE]
-> **Event Lifecycle Breakdown**:
-> 1. **Ingestion**: `kafka_consumer` (KC) handsoff raw events to `event_proc_svc` (EPS).
-> 2. **Processing**: `EPS` normalizes the payload and validates idempotency.
-> 3. **Persistence**: `EPS` updates `executions_repo` (ER) and stores the raw event in `events_repo` (EVR).
-> 4. **Live Delivery**: `EPS` triggers `ws_manager` (WM) to broadcast the update to active UI clients.
+---
+
+## Slide 3: Report Export Lifecycle
+
+The sequence for generating a point-in-time snapshot of an agent execution.
 
 ```mermaid
-graph LR
-    K[Kafka] --> KC[Kafka Consumer]
-    KC --> EPS[Processing Service]
-    EPS --> EVR[Events DB]
-    EPS --> ER[Status Update]
-    EPS --> WM[Live Push]
+sequenceDiagram
+    participant UI as Agentic UI
+    participant EXP as Export Route
+    participant PES as PDF Export Service
+    participant DB as MongoDB
+
+    UI->>EXP: GET /export/pdf/{correlation_id}
+    EXP->>PES: build_export_dto(id, soeid)
+    PES->>DB: Fetch Execution + Events
+    DB-->>PES: Raw Record Set
+    PES->>PES: Standardize to ExportExecutionDTO
+    PES->>PES: CSS-in-Logic (ReportLab)
+    PES->>EXP: return bytes (binary stream)
+    EXP->>UI: HTTP 200 (application/pdf filename=report.pdf)
+    Note over UI: Browser handles download
 ```
+
+> [!IMPORTANT]
+> **Export Integrity**:
+> 1. **SOEID Enforcement**: Reports can only be generated by the owner of the session.
+> 2. **DTO Isolation**: The `ExportExecutionDTO` ensures that internal database fields are sanitized before reaching the PDF generator.
+> 3. **Memory Efficient**: PDFs are generated as a buffer-in-memory (`BytesIO`) to avoid temporary file storage on the server.
+
 
 ---
 
