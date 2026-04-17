@@ -3,8 +3,9 @@ from setuptools import setup, find_packages
 setup(
     name="opsui-agent-recon-api",
     version="1.0.0",
-    packages=find_packages(),
+    packages=find_packages(include=["app", "app.*"]),
     include_package_data=True,
+    python_requires=">=3.11",
     install_requires=[
         "fastapi==0.110.1",
         "uvicorn==0.29.0",

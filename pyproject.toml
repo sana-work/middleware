@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opsui-agent-recon-api"
+version = "1.0.0"
+description = "Agentic Middleware API"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings",
+    "motor",
+    "confluent-kafka",
+    "httpx",
+    "python-multipart",
+    "reportlab",
+    "slowapi"
+]
+
+[tool.setuptools]
+packages = {find = {include = ["app", "app.*"]}}
