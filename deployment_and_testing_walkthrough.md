@@ -134,16 +134,64 @@ To verify the full integration path:
 
 ---
 
-## 9. Troubleshooting Common Errors
+## 10. Dev Server Background Deployment (Systemd)
 
-### 1. Kafka "No such file or directory"
-If you see `Failed to create consumer: ssl.ca.location failed: error:05880020:x509`, it means the application cannot find your SSL certificates.
-- **Root Cause**: Your `.env` paths likely start with `/app/certs/` (Docker-only) while you are running locally on macOS/Windows.
-- **Fix**: Change your `.env` paths to use relative local paths: `./certs/...`.
+On a persistent dev server (Linux), you often need the application to run as a supervised background service.
 
-### 2. "404 Not Found" on REST Requests
-If you see 404s for requests like `GET /api/chat/sessions`:
-- **Root Cause A**: Missing `/v1/` prefix. Use `http://localhost:8000/api/v1/chat/...`.
-- **Root Cause B**: Specific Route not found. Note that `sessions` index is retrieved via `GET /api/v1/chat/history/{session_id}`.
-- **Root Cause C**: Ownership Mismatch. If you request a session ID that doesn't belong to the `X-SOEID` in your header, the system returns 404 for privacy.
-- **Root Cause D**: Favicon. Icons or other static assets are not served by this API; ignore these in the logs.
+### 1. Create a Service File
+`sudo nano /etc/systemd/system/recon-middleware.service`
+
+### 2. Add the following template:
+```ini
+[Unit]
+Description=Gunicorn instance to serve Agentic Middleware
+After=network.target
+
+[Service]
+User=youruser
+Group=yourgroup
+WorkingDirectory=/path/to/OPSUI-AGENT-RECON-API
+Environment="PATH=/path/to/OPSUI-AGENT-RECON-API/venv/bin"
+# Load environment from file
+EnvironmentFile=/path/to/OPSUI-AGENT-RECON-API/.env
+ExecStart=/path/to/OPSUI-AGENT-RECON-API/venv/bin/gunicorn \
+    -w 4 -k uvicorn.workers.UvicornWorker \
+    --bind 0.0.0.0:8000 \
+    app.main:app
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 3. Start and Enable
+```bash
+sudo systemctl start recon-middleware
+sudo systemctl enable recon-middleware
+sudo systemctl status recon-middleware
+```
+
+---
+
+## 11. Reverse Proxy (Nginx)
+
+For production/staging consistency, it is recommended to put Nginx in front of the application to handle SSL termination and provide a clean URL.
+
+**Nginx Config Snippet:**
+```nginx
+server {
+    listen 80;
+    server_name middleware.dev.icg;
+
+    location / {
+        proxy_pass http://localhost:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+> [!CAUTION]
+> **WebSocket Timeout**: Ensure your Nginx `proxy_read_timeout` is set high enough (e.g., 600s) so that the Agent WebSocket doesn't disconnect during long-running "Thinking" phases.
