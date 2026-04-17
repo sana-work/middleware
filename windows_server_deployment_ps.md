@@ -62,6 +62,9 @@ Create a `certs` folder in the project root and place your Citi certificates ins
 
 ## 4. Running as a Windows Service (Persistence)
 
+> [!NOTE]  
+> This section requires **Admin Access**. If you do not have admin rights, skip to **Section 7**.
+
 To ensure the middleware runs 24/7 and restarts automatically, use **NSSM**.
 
 1.  **Open PowerShell as Admin** and navigate to where you downloaded `nssm.exe`.
@@ -73,7 +76,7 @@ To ensure the middleware runs 24/7 and restarts automatically, use **NSSM**.
     *   **Path**: `C:\Apps\opsui-agent-recon-api\venv\Scripts\python.exe`
     *   **Startup Directory**: `C:\Apps\opsui-agent-recon-api`
     *   **Arguments**: `-m uvicorn app.main:app --host 0.0.0.0 --port 8000`
-4.  **Set Environment Variables**: In the "Env" tab, paste your `.env` contents or set the `ENV_FILE_PATH`.
+4.  **Set Environment Variables**: In the "Env" tab, paste your `.env` contents.
 5.  **Click "Install Service"**.
 6.  **Start the service**:
     ```powershell
@@ -82,7 +85,41 @@ To ensure the middleware runs 24/7 and restarts automatically, use **NSSM**.
 
 ---
 
-## 5. Enterprise Pipeline Integration (Lightspeed)
+## 5. Non-Admin Deployment Strategy
+
+If you do **not** have Admin rights on the server, follow these steps to keep the application running.
+
+### 1. Bypassing Execution Policies
+If `Activate.ps1` is blocked, run your scripts using the bypass flag:
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\venv\Scripts\Activate.ps1
+```
+
+### 2. Running as a Background Job
+You can run the application in the background of your current session:
+```powershell
+# Start the middleware as a background job
+Start-Job -Name "Middleware" -ScriptBlock {
+    cd C:\Apps\opsui-agent-recon-api
+    .\venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+}
+
+# Verify it is running
+Get-Job -Name "Middleware"
+```
+
+### 3. Automatic Start on Login (Task Scheduler)
+You can set up a persistent run task without Admin rights:
+1.  Open **Task Scheduler**.
+2.  Create a **Basic Task** named "ReconMiddleware".
+3.  Trigger: **When I log on**.
+4.  Action: **Start a Program**.
+5.  Program/script: `powershell.exe`
+6.  Arguments: `-ExecutionPolicy Bypass -WindowStyle Hidden -Command "& 'C:\Apps\opsui-agent-recon-api\venv\Scripts\python.exe' -m uvicorn app.main:app --host 0.0.0.0 --port 8000"`
+
+---
+
+## 6. Enterprise Pipeline Integration (Lightspeed)
 
 Based on the `pipeline.yaml` requirements, ensure your project is properly tagged for Artifactory publishing.
 
