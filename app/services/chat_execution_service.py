@@ -43,18 +43,9 @@ class ChatExecutionService:
         # Fetch token
         token = await token_client.get_token()
 
-        # Call backend executor
-        backend_response = await backend_executor_client.execute(
-            context=request.context,
-            correlation_id=correlation_id,
-            session_id=session_id,
-            soeid=request.soeid,
-            token=token,
-        )
-
         now = format_iso(utc_now())
 
-        # Persist session (upsert)
+        # 1. Persist session (upsert)
         await SessionsRepository.create_or_update_session(
             session_id=session_id,
             soeid=request.soeid,
@@ -62,9 +53,8 @@ class ChatExecutionService:
             metadata=request.metadata,
         )
 
-        # Persist execution
+        # 2. Persist execution record FIRST to avoid race conditions with fast Kafka events
         from app.core.config import settings
-
         execution_doc: Dict[str, Any] = {
             "correlation_id": correlation_id,
             "session_id": session_id,
@@ -80,7 +70,7 @@ class ChatExecutionService:
                 },
                 "body": {"context": request.context},
             },
-            "backend_ack": backend_response,
+            "backend_ack": None, # Will be updated after call
             "status": "accepted",
             "latest_event_type": None,
             "created_at": now,
@@ -88,6 +78,31 @@ class ChatExecutionService:
             "completed_at": None,
         }
         await ExecutionsRepository.create_execution(execution_doc)
+
+        # 3. Call backend executor
+        backend_response = await backend_executor_client.execute(
+            context=request.context,
+            correlation_id=correlation_id,
+            session_id=session_id,
+            soeid=request.soeid,
+            token=token,
+        )
+
+        # 4. Update execution with backend ack
+        await ExecutionsRepository.update_execution_status(
+            correlation_id=correlation_id,
+            status="accepted",
+            latest_event_type=None,
+            completed_at=None,
+            # We add a way to update backend_ack specifically
+        )
+        # Actually I should just update the document with the ack
+        db = ExecutionsRepository.get_db_for_update()
+        await db.executions.update_one(
+            {"correlation_id": correlation_id},
+            {"$set": {"backend_ack": backend_response, "updated_at": format_iso(utc_now())}}
+        )
+
         
         # Metrics & Audit
         increment_active_executions("accepted")

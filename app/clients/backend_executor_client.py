@@ -40,7 +40,7 @@ class BackendExecutorClient:
             "X-Correlation-ID": correlation_id,
             "X-Application-ID": settings.BACKEND_APPLICATION_ID,
             "Session-ID": session_id,
-            "X-SOEID": soeid,
+            "x-soeid": soeid,
             "X-Authorization-Coin": f"Bearer {token}",
             "Content-Type": "application/json",
         }

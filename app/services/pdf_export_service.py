@@ -142,7 +142,7 @@ class PDFExportService:
         elements = []
 
         # Header Area (Logo Placeholder + Title)
-        elements.append(Paragraph("AGENTIC MIDDLEWARE", ParagraphStyle('brand', fontSize=10, textColor=colors.grey, letterSpacing=2, alignment=1)))
+        elements.append(Paragraph("OPSUI - AGENTIC CHAT", ParagraphStyle('brand', fontSize=10, textColor=colors.grey, letterSpacing=2, alignment=1)))
         elements.append(Paragraph("EXECUTION REPORT", title_style))
         elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#003366"), spaceAfter=20))
 

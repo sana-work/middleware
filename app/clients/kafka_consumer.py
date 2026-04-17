@@ -143,18 +143,42 @@ class KafkaEventConsumer:
             self._safe_commit(msg)
             return
 
-        # 2. Filter by allowed event types
+        # 2. Resilient Payload Unwrapping
+        # Handle cases where backend wraps data in a 'data' key (either as object or stringified)
+        if "data" in payload:
+            inner_data = payload["data"]
+            if isinstance(inner_data, str):
+                try:
+                    payload = json.loads(inner_data)
+                except json.JSONDecodeError:
+                    logger.warning("Failed to decode stringified 'data' field, using top-level payload", offset=offset)
+            elif isinstance(inner_data, dict):
+                payload = inner_data
+
+        # 3. Extract correlation and event identity (handle both x_correlation_id and correlation_id)
         event_type = payload.get("event_type")
+        x_correlation_id = payload.get("x_correlation_id") or payload.get("correlation_id")
+        
+        # 3.5 Infer event_type if missing based on status (SUCCESS/FAILED)
+        if not event_type:
+            status_val = payload.get("status")
+            if status_val == "SUCCESS":
+                 event_type = "EXECUTION_FINAL_RESPONSE"
+            elif status_val == "FAILED":
+                 event_type = "AGENT_ERROR_EVENT"
+            
+            # Update payload dict so Pydantic/Persistence sees the inferred type
+            payload["event_type"] = event_type
+
+        # 4. Filter by allowed event types (Now using the unwrapped/inferred event_type)
         if event_type not in ALLOWED_EVENT_TYPES:
-            logger.debug("Ignored event type", event_type=event_type, offset=offset)
+            logger.debug("Ignored event type after unwrapping", event_type=event_type, offset=offset)
             self._safe_commit(msg)
             return
 
-        # 3. Extract correlation_id
-        x_correlation_id = payload.get("x_correlation_id")
         if not x_correlation_id:
             logger.warning(
-                "Kafka event missing x_correlation_id, skipping",
+                "Kafka event missing correlation ID after unwrapping, skipping",
                 event_type=event_type,
                 offset=offset,
             )

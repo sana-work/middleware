@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/v1/chat/export")
 async def export_execution_pdf(
     request: Request,
     correlation_id: str,
-    x_soeid: str = Header(...),
+    x_soeid: str = Header(..., alias="x-soeid"),
     include_timestamps: bool = Query(True, description="Currently formatting relies on Jinja, param kept for spec alignment"),
     include_raw: bool = Query(False, description="Whether to include raw JSON payload excerpts in the PDF timeline"),
     download: bool = Query(True, description="Whether to force Content-Disposition: attachment for direct download")

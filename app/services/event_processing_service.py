@@ -9,7 +9,8 @@ from app.models.kafka_events import (
     EXECUTION_STATUS_MAP,
     EVENT_SUMMARY_MAP,
     NormalizedEvent,
-    ALLOWED_EVENT_TYPES
+    ALLOWED_EVENT_TYPES,
+    TERMINAL_ERROR_PATTERNS
 )
 from app.services.metrics_service import (
     KAFKA_EVENTS_PROCESSED_TOTAL,
@@ -49,8 +50,16 @@ class EventProcessingService:
         """
         event_type = raw_event.event_type
         
-        # 0. Check if allowed
+        # 0. Infer event_type if missing (Handling backend terminal signals with just status)
+        if not event_type:
+            if raw_event.status == "SUCCESS":
+                 event_type = "EXECUTION_FINAL_RESPONSE"
+            elif raw_event.status == "FAILED":
+                 event_type = "AGENT_ERROR_EVENT"
+            
+        # Check if allowed after inference
         if event_type not in ALLOWED_EVENT_TYPES:
+            logger.debug("Ignoring event with no type mapping", correlation_id=correlation_id, status=raw_event.status)
             KAFKA_EVENTS_IGNORED_TOTAL.inc()
             return None
 
@@ -63,6 +72,19 @@ class EventProcessingService:
             tool_name=raw_event.tool_name or "unknown",
             agent_name=raw_event.agent_name or "unknown",
         )
+
+        # 0.1 Handle hidden failures in final response (e.g. MCP Errors)
+        if event_type == "EXECUTION_FINAL_RESPONSE" and raw_event.response:
+            resp_str = str(raw_event.response)
+            if any(pattern in resp_str for pattern in TERMINAL_ERROR_PATTERNS):
+                logger.warning(
+                    "Detected hidden failure in final response", 
+                    correlation_id=correlation_id,
+                    pattern_found=True
+                )
+                execution_status = "failed"
+                normalized_type = "agent_failed"
+                summary = "Final execution failed: Hidden agent error detected"
 
         # Build timestamp
         event_timestamp = raw_event.timestamp or format_iso(utc_now())

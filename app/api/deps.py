@@ -2,7 +2,7 @@ from fastapi import Query, Header, HTTPException, status
 from typing import Optional
 
 async def get_current_user(
-    x_soeid: Optional[str] = Header(None, alias="X-SOEID"),
+    x_soeid: Optional[str] = Header(None, alias="x-soeid"),
     soeid: Optional[str] = Query(None),
 ) -> str:
     """

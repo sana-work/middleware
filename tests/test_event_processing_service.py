@@ -194,3 +194,95 @@ async def test_process_tool_input_event(mock_settings):
         assert result["normalized_event_type"] == "tool_started"
         assert result["status"] == "in_progress"
         assert "find_payments_by_amount" in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_process_final_response_with_hidden_error(mock_settings):
+    """Test that EXECUTION_FINAL_RESPONSE with 'MCP Error' triggers status=failed."""
+    raw_event = RawKafkaEvent(
+        x_correlation_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        event_type="EXECUTION_FINAL_RESPONSE",
+        response="MCP Error: occurred during debug_payment_transaction_by_id",
+        timestamp="2026-04-15T10:30:00.000000",
+    )
+
+    mock_execution = {
+        "correlation_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "session_id": "11111111-2222-3333-4444-555555555555",
+        "soeid": "TEST001",
+        "status": "in_progress",
+    }
+
+    with (
+        patch(
+            "app.services.event_processing_service.ExecutionsRepository.get_execution",
+            new_callable=AsyncMock,
+            return_value=mock_execution,
+        ),
+        patch(
+            "app.services.event_processing_service.EventsRepository.insert_event",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "app.services.event_processing_service.ExecutionsRepository.update_execution_status",
+            new_callable=AsyncMock,
+        ) as mock_update,
+    ):
+        result = await EventProcessingService.process_kafka_event(
+            raw_event=raw_event,
+            correlation_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        )
+
+        assert result is not None
+        assert result["status"] == "failed"
+        assert result["normalized_event_type"] == "agent_failed"
+        assert "Hidden agent error detected" in result["summary"]
+
+        # Verify that update_execution_status was called with 'failed'
+        mock_update.assert_called_once_with(
+            correlation_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            status="failed",
+            latest_event_type="EXECUTION_FINAL_RESPONSE",
+            completed_at="2026-04-15T10:30:00.000000",
+        )
+
+
+@pytest.mark.asyncio
+async def test_process_implicit_success_event(mock_settings):
+    """Test that an event with status='SUCCESS' but NO event_type is inferred as EXECUTION_FINAL_RESPONSE."""
+    raw_event = RawKafkaEvent(
+        x_correlation_id="aaaa-bbbb-cccc",
+        status="SUCCESS",
+        response="Operation finished successfully",
+        timestamp="2026-04-15T12:00:00.000000",
+    )
+
+    mock_execution = {
+        "correlation_id": "aaaa-bbbb-cccc",
+        "session_id": "sess-999",
+        "soeid": "TEST001",
+        "status": "in_progress",
+    }
+
+    with (
+        patch("app.services.event_processing_service.ExecutionsRepository.get_execution", new_callable=AsyncMock, return_value=mock_execution),
+        patch("app.services.event_processing_service.EventsRepository.insert_event", new_callable=AsyncMock, return_value=True),
+        patch("app.services.event_processing_service.ExecutionsRepository.update_execution_status", new_callable=AsyncMock) as mock_update,
+    ):
+        result = await EventProcessingService.process_kafka_event(
+            raw_event=raw_event,
+            correlation_id="aaaa-bbbb-cccc",
+        )
+
+        assert result is not None
+        assert result["event_type"] == "EXECUTION_FINAL_RESPONSE"
+        assert result["status"] == "completed"
+        assert "Operation finished successfully" in str(result["payload"])
+        
+        mock_update.assert_called_once_with(
+            correlation_id="aaaa-bbbb-cccc",
+            status="completed",
+            latest_event_type="EXECUTION_FINAL_RESPONSE",
+            completed_at="2026-04-15T12:00:00.000000",
+        )

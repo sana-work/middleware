@@ -14,6 +14,15 @@ ALLOWED_EVENT_TYPES: Set[str] = {
     "EXECUTION_FINAL_RESPONSE",
 }
 
+# --- Error detection patterns ---
+# Substrings that, if found in a final response, indicate the run should be flagged as 'failed'
+TERMINAL_ERROR_PATTERNS: Set[str] = {
+    "MCP Error:",
+    "Internal error: Error calling tool",
+    "Agent failed to provide a valid response",
+    "Backend error: ",
+}
+
 # --- Normalization map ---
 
 EVENT_NORMALIZATION_MAP: Dict[str, str] = {
@@ -57,6 +66,7 @@ class RawKafkaEvent(BaseModel):
     Fields are optional because different event types carry different fields.
     """
     x_correlation_id: Optional[str] = None
+    correlation_id: Optional[str] = None
     status: Optional[str] = None
     event_type: Optional[str] = None
     agent_name: Optional[str] = None

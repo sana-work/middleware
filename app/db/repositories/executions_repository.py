@@ -11,6 +11,10 @@ class ExecutionsRepository:
     """Repository for the recon MongoDB collection (Executions)."""
 
     @staticmethod
+    def get_db_for_update():
+        return get_database()
+
+    @staticmethod
     async def create_execution(doc: Dict[str, Any]) -> None:
         """Insert a new execution document."""
         db = get_database()
