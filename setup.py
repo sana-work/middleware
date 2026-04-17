@@ -1,22 +1,24 @@
 from setuptools import setup, find_packages
 
+__Version__ = "1.0.0"
+
 setup(
     name="opsui-agent-recon-api",
-    version="1.0.0",
-    packages=find_packages(include=["app", "app.*"]),
+    version=__Version__,
+    packages=find_packages(exclude=["tests", "docs"]),
     include_package_data=True,
     python_requires=">=3.11",
     install_requires=[
-        "fastapi==0.110.1",
-        "uvicorn==0.29.0",
-        "pydantic==2.7.0",
-        "pydantic-settings==2.2.1",
-        "motor==3.4.0",
-        "confluent-kafka==2.3.0",
-        "httpx==0.27.0",
-        "python-multipart==0.0.9",
-        "reportlab==4.1.0",
-        "slowapi==0.1.9"
+        "fastapi",
+        "uvicorn",
+        "pydantic",
+        "pydantic-settings",
+        "motor",
+        "confluent-kafka",
+        "httpx",
+        "python-multipart",
+        "reportlab",
+        "slowapi"
     ],
     entry_points={
         "console_scripts": [
