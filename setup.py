@@ -14,7 +14,7 @@ setup(
         "pydantic",
         "pydantic-settings",
         "motor",
-        "confluent-kafka",
+        "aiokafka>=0.11.0",
         "httpx",
         "python-multipart",
         "reportlab",

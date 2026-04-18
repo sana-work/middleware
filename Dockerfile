@@ -1,41 +1,37 @@
-# Base image using Python 3.13 to align with Lightspeed Enterprise requirements
-FROM python:3.13-slim
+# 1. Use the core enterprise Miniconda image (aligned with the Python 3.13 transition)
+FROM python:3.13-slim AS builder
 
-# Install system dependencies required for confluent-kafka and standard build tools
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    librdkafka-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Keeps Python from generating .pyc files in the container
-ENV PYTHONDONTWRITEBYTECODE=1
-
-# Turns off buffering for easier container logging
-ENV PYTHONUNBUFFERED=1
+# 2. Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/env/bin:$PATH"
 
 WORKDIR /app
 
-# Install pip requirements
-# Sourcing /env is required for internal Artifactory access in Citi environments
-# Use the shell execution pattern shown in enterprise documentation
-RUN . /env && python -m pip install --no-cache-dir -r requirements.txt
+# 3. Securely source the enterprise environment for Artifactory access
+# This matches your pipeline.yaml requirements
+RUN source /env && \
+    pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir uv
 
-# Copy application source code
+# 4. Copy and Install dependencies using UV (fastest way in the Miniconda agent)
+COPY requirements.txt .
+RUN source /env && uv pip install --no-cache-dir -r requirements.txt
+
+# 5. Build the final application image
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Copy the virtual environment and code
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 COPY . .
 
-# Create a non-root user for security
-# Create logs directory and ensure the non-root user can write to it
-RUN adduser -u 5678 --disabled-password --gecos "" appuser \
-    && mkdir -p /app/logs \
-    && chown -R appuser:appuser /app
+# Environment setup for internal Citi proxy/ca-certs if needed
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
-# Switch to non-root user
-USER appuser
-
-# Expose port 8000
 EXPOSE 8000
 
-# Use Gunicorn as the production process manager with Uvicorn workers
-# -k uvicorn.workers.UvicornWorker allows Gunicorn to handle FastAPI's async nature
-# --bind 0.0.0.0:8000 ensures accessibility inside the container network
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "-k", "uvicorn.workers.UvicornWorker", "app.main:app"]
+# Start command
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

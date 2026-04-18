@@ -159,3 +159,10 @@ $response | ConvertTo-Json
 ### Troubleshooting Windows Specifics
 *   **Port 8000**: Ensure you have a Firewall Inbound Rule allowing traffic on port 8000.
 *   **Librdkafka**: If Kafka fails to connect, ensure `msvcp140.dll` (Visual C++ Redistributable) is installed on the Windows Server.
+
+# 1. Install uv (one-time)
+powershell -c "irmo https://astral.sh/uv/install.ps1 | iex"
+
+# 2. Sync dependencies (replaces pip install -e .)
+uv pip install -e .
+

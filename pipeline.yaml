@@ -6,5 +6,7 @@ tasks:
     params:
       - name: python-version
         value: 3.13
+      - name: build-tool
+        value: "uv"
       - name: publish-artifact
         value: 'true'
