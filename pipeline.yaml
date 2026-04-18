@@ -1,0 +1,10 @@
+version: v1
+config:
+  useTaskHooks: "true"
+tasks:
+  - ref: python-build
+    params:
+      - name: python-version
+        value: 3.13
+      - name: publish-artifact
+        value: 'true'

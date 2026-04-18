@@ -7,7 +7,7 @@ setup(
     version=__Version__,
     packages=find_packages(exclude=["tests", "docs"]),
     include_package_data=True,
-    python_requires=">=3.11",
+    python_requires=">=3.13",
     install_requires=[
         "fastapi",
         "uvicorn",
