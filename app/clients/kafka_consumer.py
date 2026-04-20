@@ -114,13 +114,23 @@ class KafkaEventConsumer:
             payload = self._recursive_json_loads(initial_str)
             
             if not isinstance(payload, dict):
-                logger.error("Kafka message payload is not a dictionary after decoding", offset=offset)
+                logger.error("Kafka message payload is not a dictionary after decoding", offset=offset, raw_type=type(payload).__name__)
                 await self._safe_commit()
                 return
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.error("Malformed Kafka message, skipping", error=str(e), offset=offset)
             await self._safe_commit()
             return
+
+        # Log all top-level keys so we can detect unexpected field names from the backend
+        logger.info(
+            "Raw payload keys received",
+            offset=offset,
+            keys=list(payload.keys()),
+            event_type_raw=payload.get("event_type"),
+            latest_event_type_raw=payload.get("latest_event_type"),
+            status_raw=payload.get("status"),
+        )
 
         # Unwrap payload if nested in 'data' or 'body'
         for wrapper in ["data", "body"]:
@@ -131,6 +141,7 @@ class KafkaEventConsumer:
                     inner_data = self._recursive_json_loads(inner_data)
                 
                 if isinstance(inner_data, dict):
+                    logger.info("Unwrapping nested payload", wrapper=wrapper, inner_keys=list(inner_data.keys()), offset=offset)
                     payload.update(inner_data)
 
         # Extract type and correlation ID with fallbacks
@@ -163,16 +174,17 @@ class KafkaEventConsumer:
         )
         
         if not x_correlation_id:
-            logger.warning("Missing correlation_id in payload, skipping", offset=offset)
+            logger.warning("Missing correlation_id in payload, skipping", offset=offset, full_payload=payload)
             await self._safe_commit()
             return
 
         if event_type not in ALLOWED_EVENT_TYPES:
-            logger.info(
+            logger.warning(
                 "Event type not in allowed list, skipping", 
                 event_type=event_type, 
-                allowed=list(ALLOWED_EVENT_TYPES),
-                offset=offset
+                allowed=sorted(ALLOWED_EVENT_TYPES),
+                offset=offset,
+                full_payload=payload
             )
             await self._safe_commit()
             return
