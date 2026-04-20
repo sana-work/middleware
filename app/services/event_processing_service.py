@@ -53,16 +53,25 @@ class EventProcessingService:
         """
         event_type = raw_event.event_type
         
-        # 0. Infer event_type if missing (Handling backend terminal signals with just status)
+        # 0. Infer event_type if missing (Handling backend terminal signals or generic tool events)
         if not event_type:
             if raw_event.status == "SUCCESS":
                  event_type = "EXECUTION_FINAL_RESPONSE"
             elif raw_event.status == "FAILED":
                  event_type = "AGENT_ERROR_EVENT"
+            elif raw_event.tool_name:
+                 # If we have a tool name but no type, assume it's a generic tool event
+                 event_type = "TOOL_CALL_EVENT"
             
         # Check if allowed after inference
         if event_type not in ALLOWED_EVENT_TYPES:
-            logger.debug("Ignoring event with no type mapping", correlation_id=correlation_id, status=raw_event.status)
+            logger.warning(
+                "Ignoring event with unsupported type", 
+                correlation_id=correlation_id, 
+                event_type=event_type,
+                status=raw_event.status,
+                tool_name=raw_event.tool_name
+            )
             KAFKA_EVENTS_IGNORED_TOTAL.inc()
             return None
 

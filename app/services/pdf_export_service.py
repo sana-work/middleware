@@ -157,12 +157,12 @@ class PDFExportService:
                 # We stay in the context of the last agent for now as tools usually finish before the agent does
                 pass
 
-            elif et in ("TOOL_INPUT_EVENT", "TOOL_OUTPUT_EVENT", "TOOL_ERROR_EVENT"):
+            elif et in ("TOOL_INPUT_EVENT", "TOOL_OUTPUT_EVENT", "TOOL_ERROR_EVENT", "TOOL_CALL_EVENT", "TOOL_RESPONSE_EVENT"):
                 if not current_agent:
                     # Fallback for tools called outside of explicit agent start
                     current_agent = {
                         "type": "agent",
-                        "label": "System Process",
+                        "label": "General Investigation — Analysis Continued",
                         "timestamp": event.timestamp,
                         "tools": [],
                         "tool_map": {}
@@ -450,8 +450,9 @@ class PDFExportService:
 
         for item in consolidated:
             if item["type"] == "agent":
-                # 1. Agent Heading
-                agent_lbl = f"<font color='#00509d'><b>&#9654;</b></font>  {item['label']}"
+                # 1. Agent Heading with Timestamp
+                ts_str = item["timestamp"].split("T")[1][:8] if "T" in item["timestamp"] else item["timestamp"]
+                agent_lbl = f"<font color='#00509d'><b>&#9654;</b></font>  {item['label']} <font color='#666666' size='8'>(Time: {ts_str})</font>"
                 elements.append(Paragraph(agent_lbl, agent_step_style))
                 
                 # Add bookmark for Agent
