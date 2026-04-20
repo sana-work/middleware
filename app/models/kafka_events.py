@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any, Set
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 # --- Allowed event types ---
@@ -65,10 +65,14 @@ class RawKafkaEvent(BaseModel):
     Flexible model for raw Kafka event payloads.
     Fields are optional because different event types carry different fields.
     """
+    model_config = ConfigDict(extra="allow")
+
     x_correlation_id: Optional[str] = None
     correlation_id: Optional[str] = None
     status: Optional[str] = None
     event_type: Optional[str] = None
+    latest_event_type: Optional[str] = None
+    event: Optional[str] = None
     agent_name: Optional[str] = None
     tool_name: Optional[str] = None
     invocation_id: Optional[str] = None

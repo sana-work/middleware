@@ -83,6 +83,20 @@ class KafkaEventConsumer:
         finally:
             await self.stop()
 
+    def _recursive_json_loads(self, data: Any) -> Any:
+        """Recursively decode JSON strings until a non-JSON string or non-string is found."""
+        if not isinstance(data, str):
+            return data
+            
+        try:
+            decoded = json.loads(data)
+            # If we successfully decoded it and it's still a string, try again
+            if isinstance(decoded, str) and decoded != data:
+                return self._recursive_json_loads(decoded)
+            return decoded
+        except (json.JSONDecodeError, TypeError):
+            return data
+
     async def _process_message(self, msg) -> None:
         """Process a single Kafka message."""
         raw_value = msg.value
@@ -92,39 +106,50 @@ class KafkaEventConsumer:
         offset = msg.offset
 
         try:
-            payload = json.loads(raw_value.decode("utf-8"))
-            if isinstance(payload, str):
-                try:
-                    payload = json.loads(payload)
-                except json.JSONDecodeError:
-                    pass
+            # First pass: decode bytes to string then recursively decode JSON
+            initial_str = raw_value.decode("utf-8")
+            payload = self._recursive_json_loads(initial_str)
+            
+            if not isinstance(payload, dict):
+                logger.error("Kafka message payload is not a dictionary after decoding", offset=offset)
+                await self._safe_commit()
+                return
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.error("Malformed Kafka message, skipping", error=str(e), offset=offset)
             await self._safe_commit()
             return
 
-        # Unwrap payload if nested
-        if "data" in payload:
-            inner_data = payload["data"]
-            if isinstance(inner_data, str):
-                try:
-                    payload.update(json.loads(inner_data))
-                except json.JSONDecodeError:
-                    pass
-            elif isinstance(inner_data, dict):
-                payload.update(inner_data)
+        # Unwrap payload if nested in 'data' or 'body'
+        for wrapper in ["data", "body"]:
+            if wrapper in payload:
+                inner_data = payload[wrapper]
+                # Recursively decode the nested data if it's a string
+                if isinstance(inner_data, str):
+                    inner_data = self._recursive_json_loads(inner_data)
+                
+                if isinstance(inner_data, dict):
+                    payload.update(inner_data)
 
-        event_type = payload.get("event_type")
-        x_correlation_id = payload.get("x_correlation_id") or payload.get("correlation_id")
+        # Extract type and correlation ID with fallbacks
+        event_type = payload.get("event_type") or payload.get("latest_event_type")
+        x_correlation_id = (
+            payload.get("x_correlation_id") or 
+            payload.get("correlation_id") or 
+            payload.get("idempotency_key", "").split(":")[0] if ":" in payload.get("idempotency_key", "") else None
+        )
         
-        # Infer event type if missing
+        # Infer event type if missing or if it's a generic status update
         if not event_type:
             status_val = payload.get("status")
-            if status_val == "SUCCESS":
+            if status_val == "SUCCESS" or status_val == "completed":
                  event_type = "EXECUTION_FINAL_RESPONSE"
-            elif status_val == "FAILED":
+            elif status_val == "FAILED" or status_val == "failed":
                  event_type = "AGENT_ERROR_EVENT"
-            payload["event_type"] = event_type
+            elif status_val == "running":
+                 event_type = "AGENT_START_EVENT"
+            
+            if event_type:
+                payload["event_type"] = event_type
         
         if event_type not in ALLOWED_EVENT_TYPES or not x_correlation_id:
             await self._safe_commit()
@@ -134,6 +159,8 @@ class KafkaEventConsumer:
             "topic": topic,
             "partition": partition,
             "offset": offset,
+            "timestamp": msg.timestamp,
+            "headers": {k: v.decode("utf-8") if v else None for k, v in msg.headers} if msg.headers else None,
             "consumed_at": format_iso(utc_now()),
             "raw_key": raw_key.decode("utf-8") if raw_key else None,
         }
