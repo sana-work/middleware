@@ -64,7 +64,16 @@ class KafkaEventConsumer:
         try:
             await self._consumer.start()
             self._running = True
-            logger.info("Kafka consumer started", topic=settings.KAFKA_TOPIC)
+            
+            # Log assigned partitions to detect if we're missing any
+            assigned = self._consumer.assignment()
+            logger.info(
+                "Kafka consumer started",
+                topic=settings.KAFKA_TOPIC,
+                assigned_partitions=[f"p{tp.partition}" for tp in assigned],
+                partition_count=len(assigned),
+            )
+            
             asyncio.create_task(self._consume_loop())
         except Exception as e:
             logger.error("Failed to start Kafka consumer", error=str(e))
