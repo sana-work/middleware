@@ -1,7 +1,7 @@
 import asyncio
 import json
 import ssl
-from typing import Optional
+from typing import Optional, Any
 
 from aiokafka import AIOKafkaConsumer
 from aiokafka.errors import KafkaError
@@ -71,11 +71,14 @@ class KafkaEventConsumer:
 
     async def _consume_loop(self) -> None:
         """Main async consumption loop."""
+        logger.info("Starting Kafka consumption loop", topic=settings.KAFKA_TOPIC)
         try:
             async for msg in self._consumer:
                 if not self._running:
+                    logger.info("Consumer loop stopping: loop flag False")
                     break
                 
+                logger.info("Kafka message received", topic=msg.topic, partition=msg.partition, offset=msg.offset)
                 KAFKA_MESSAGES_CONSUMED_TOTAL.inc()
                 await self._process_message(msg)
         except Exception as e:
@@ -135,7 +138,7 @@ class KafkaEventConsumer:
         x_correlation_id = (
             payload.get("x_correlation_id") or 
             payload.get("correlation_id") or 
-            payload.get("idempotency_key", "").split(":")[0] if ":" in payload.get("idempotency_key", "") else None
+            (payload.get("idempotency_key", "").split(":")[0] if ":" in payload.get("idempotency_key", "") else None)
         )
         
         # Infer event type if missing or if it's a generic status update
@@ -149,9 +152,28 @@ class KafkaEventConsumer:
                  event_type = "AGENT_START_EVENT"
             
             if event_type:
+                logger.debug("Inferred event type from status", status=status_val, event_type=event_type)
                 payload["event_type"] = event_type
         
-        if event_type not in ALLOWED_EVENT_TYPES or not x_correlation_id:
+        logger.info(
+            "Extracted event metadata", 
+            event_type=event_type, 
+            correlation_id=x_correlation_id,
+            offset=offset
+        )
+        
+        if not x_correlation_id:
+            logger.warning("Missing correlation_id in payload, skipping", offset=offset)
+            await self._safe_commit()
+            return
+
+        if event_type not in ALLOWED_EVENT_TYPES:
+            logger.info(
+                "Event type not in allowed list, skipping", 
+                event_type=event_type, 
+                allowed=list(ALLOWED_EVENT_TYPES),
+                offset=offset
+            )
             await self._safe_commit()
             return
 
