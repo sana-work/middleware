@@ -11,10 +11,10 @@ from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 
 from app.models.export_models import ExportExecutionDTO, ExportEventDTO
-from app.models.kafka_events import TOOL_BUSINESS_CONTEXT_MAP, AGENT_BUSINESS_CONTEXT_MAP
 from app.db.repositories.executions_repository import ExecutionsRepository
 from app.db.repositories.events_repository import EventsRepository
 from app.core.logging import get_logger
+from app.utils.business_logic import get_business_description
 
 logger = get_logger(__name__)
 
@@ -51,7 +51,7 @@ class PDFExportService:
                 excerpt = event.get("raw_payload")
 
             # Generate business-friendly description
-            business_desc = PDFExportService._get_business_description(
+            business_desc = get_business_description(
                 event_type, tool_name, agent_name
             )
 
@@ -104,173 +104,126 @@ class PDFExportService:
         )
 
     @staticmethod
-    def _get_business_description(
-        event_type: Optional[str], tool_name: Optional[str], agent_name: Optional[str]
-    ) -> Optional[str]:
-        """Generate a business-friendly description for a given event."""
-        if not event_type:
-            return None
-
-        # Tool events: use the business context map or generate from tool name
-        if event_type in ("TOOL_INPUT_EVENT", "TOOL_OUTPUT_EVENT", "TOOL_ERROR_EVENT") and tool_name:
-            mapped = TOOL_BUSINESS_CONTEXT_MAP.get(tool_name)
-            if mapped:
-                if event_type == "TOOL_OUTPUT_EVENT":
-                    return f"Completed: {mapped}"
-                elif event_type == "TOOL_ERROR_EVENT":
-                    return f"Failed: {mapped}"
-                return mapped
-            
-            # Fallback: generate readable name from tool_name
-            readable = tool_name.replace("_", " ").title()
-            if event_type == "TOOL_OUTPUT_EVENT":
-                return f"Completed: {readable}"
-            elif event_type == "TOOL_ERROR_EVENT":
-                return f"Failed: {readable}"
-            return f"Executing: {readable}"
-
-        # Agent events
-        if event_type in ("AGENT_START_EVENT", "AGENT_COMPLETION_EVENT", "AGENT_ERROR_EVENT") and agent_name:
-            friendly = AGENT_BUSINESS_CONTEXT_MAP.get(agent_name, agent_name.replace("_", " ").title())
-            if event_type == "AGENT_START_EVENT":
-                return f"{friendly} has begun analyzing the request"
-            elif event_type == "AGENT_COMPLETION_EVENT":
-                return f"{friendly} has finished its analysis"
-            elif event_type == "AGENT_ERROR_EVENT":
-                return f"{friendly} encountered an issue during analysis"
-
-        if event_type == "EXECUTION_FINAL_RESPONSE":
-            return "Investigation complete"
-
-        return None
-
-    @staticmethod
     def _consolidate_timeline(events: List[ExportEventDTO]) -> List[Dict[str, Any]]:
         """
-        Consolidate raw events into a concise business-oriented timeline.
+        Consolidate raw events into a hierarchical timeline.
         
-        - Merges TOOL_INPUT + TOOL_OUTPUT pairs into a single step with duration.
-        - Groups repeated calls to the same tool.
-        - Keeps agent start/completion and final response as bookends.
+        Structure:
+        [
+            {
+                "type": "agent",
+                "label": "Agent Name — Analysis Started",
+                "timestamp": "...",
+                "tools": [
+                    {
+                        "label": "Tool Name (Duration)",
+                        "status": "completed|failed|running",
+                        "start_ts": "...",
+                        "end_ts": "..."
+                    }
+                ]
+            },
+            {
+                "type": "final",
+                "label": "Final response generated",
+                "timestamp": "..."
+            }
+        ]
         """
-        steps: List[Dict[str, Any]] = []
-        # Ordered dict to track tool calls in order of first appearance
-        tool_order: List[str] = []
-        tool_tracker: Dict[str, Dict] = {}
+        hierarchy = []
+        current_agent = None
+        tool_trackers = {} # correlation_id -> tool_name -> info
 
         for event in events:
             et = event.event_type
 
-            # Agent bookend events
             if et == "AGENT_START_EVENT":
                 agent_raw = event.summary.split(": ", 1)[-1] if ": " in event.summary else "Agent"
+                from app.models.kafka_events import AGENT_BUSINESS_CONTEXT_MAP
                 friendly = AGENT_BUSINESS_CONTEXT_MAP.get(
                     agent_raw.lower().replace(" ", "_"),
                     agent_raw.replace("_", " ").title()
                 )
-                steps.append({
-                    "icon": "START",
+                current_agent = {
+                    "type": "agent",
                     "label": f"{friendly} — Analysis Started",
                     "timestamp": event.timestamp,
-                    "type": "agent_start",
-                })
+                    "tools": [],
+                    "tool_map": {} # tool_name -> tool_obj
+                }
+                hierarchy.append(current_agent)
 
-            elif et == "AGENT_COMPLETION_EVENT":
-                agent_raw = event.summary.split(": ", 1)[-1] if ": " in event.summary else "Agent"
-                friendly = AGENT_BUSINESS_CONTEXT_MAP.get(
-                    agent_raw.lower().replace(" ", "_"),
-                    agent_raw.replace("_", " ").title()
-                )
-                steps.append({
-                    "icon": "DONE",
-                    "label": f"{friendly} — Analysis Complete",
-                    "timestamp": event.timestamp,
-                    "type": "agent_done",
-                })
+            elif et == "AGENT_COMPLETION_EVENT" or et == "AGENT_ERROR_EVENT":
+                # We stay in the context of the last agent for now as tools usually finish before the agent does
+                pass
 
-            elif et == "AGENT_ERROR_EVENT":
-                steps.append({
-                    "icon": "FAIL",
-                    "label": "Agent encountered an error",
-                    "timestamp": event.timestamp,
-                    "type": "agent_error",
-                })
-
-            # Tool input: record start time
-            elif et == "TOOL_INPUT_EVENT" and event.tool_name:
-                tn = event.tool_name
-                if tn not in tool_tracker:
-                    tool_order.append(tn)
-                    tool_tracker[tn] = {
-                        "call_count": 0,
-                        "first_start": event.timestamp,
-                        "last_end": None,
-                        "status": "running",
+            elif et in ("TOOL_INPUT_EVENT", "TOOL_OUTPUT_EVENT", "TOOL_ERROR_EVENT"):
+                if not current_agent:
+                    # Fallback for tools called outside of explicit agent start
+                    current_agent = {
+                        "type": "agent",
+                        "label": "System Process",
+                        "timestamp": event.timestamp,
+                        "tools": [],
+                        "tool_map": {}
                     }
-                tool_tracker[tn]["call_count"] += 1
+                    hierarchy.append(current_agent)
+                
+                tn = event.tool_name or "unknown_tool"
+                if tn not in current_agent["tool_map"]:
+                    from app.models.kafka_events import TOOL_BUSINESS_CONTEXT_MAP
+                    mapped = TOOL_BUSINESS_CONTEXT_MAP.get(tn, tn.replace("_", " ").title())
+                    tool_obj = {
+                        "name": tn,
+                        "label": mapped,
+                        "start_ts": None,
+                        "end_ts": None,
+                        "status": "running",
+                        "call_count": 0
+                    }
+                    current_agent["tools"].append(tool_obj)
+                    current_agent["tool_map"][tn] = tool_obj
+                
+                tool = current_agent["tool_map"][tn]
+                if et == "TOOL_INPUT_EVENT":
+                    if not tool["start_ts"]:
+                        tool["start_ts"] = event.timestamp
+                    tool["call_count"] += 1
+                elif et == "TOOL_OUTPUT_EVENT":
+                    tool["end_ts"] = event.timestamp
+                    tool["status"] = "completed"
+                elif et == "TOOL_ERROR_EVENT":
+                    tool["end_ts"] = event.timestamp
+                    tool["status"] = "failed"
 
-            # Tool output: record end time
-            elif et == "TOOL_OUTPUT_EVENT" and event.tool_name:
-                tn = event.tool_name
-                if tn in tool_tracker:
-                    tool_tracker[tn]["last_end"] = event.timestamp
-                    tool_tracker[tn]["status"] = "completed"
-
-            # Tool error
-            elif et == "TOOL_ERROR_EVENT" and event.tool_name:
-                tn = event.tool_name
-                if tn in tool_tracker:
-                    tool_tracker[tn]["last_end"] = event.timestamp
-                    tool_tracker[tn]["status"] = "failed"
-
-            # Execution final response
             elif et == "EXECUTION_FINAL_RESPONSE":
-                steps.append({
-                    "icon": "REPORT",
-                    "label": "Final response generated",
-                    "timestamp": event.timestamp,
+                hierarchy.append({
                     "type": "final",
+                    "label": "Final response generated",
+                    "timestamp": event.timestamp
                 })
 
-        # Build consolidated tool steps (preserve order of first appearance)
-        tool_steps = []
-        for tn in tool_order:
-            info = tool_tracker[tn]
-            mapped = TOOL_BUSINESS_CONTEXT_MAP.get(tn, tn.replace("_", " ").title())
-            
-            # Calculate duration
-            duration_str = ""
-            if info.get("first_start") and info.get("last_end"):
-                try:
-                    start = datetime.fromisoformat(info["first_start"].replace("Z", "+00:00"))
-                    end = datetime.fromisoformat(info["last_end"].replace("Z", "+00:00"))
-                    secs = (end - start).total_seconds()
-                    if secs < 60:
-                        duration_str = f" ({secs:.0f}s)"
-                    else:
-                        duration_str = f" ({secs / 60:.1f}m)"
-                except (ValueError, TypeError):
-                    pass
+        # Final cleanup: Calculate durations and labels
+        for item in hierarchy:
+            if item["type"] == "agent":
+                for tool in item["tools"]:
+                    duration_str = ""
+                    if tool["start_ts"] and tool["end_ts"]:
+                        try:
+                            start = datetime.fromisoformat(tool["start_ts"].replace("Z", "+00:00"))
+                            end = datetime.fromisoformat(tool["end_ts"].replace("Z", "+00:00"))
+                            secs = (end - start).total_seconds()
+                            duration_str = f" ({secs:.0f}s)" if secs < 60 else f" ({secs / 60:.1f}m)"
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    count_str = f" [{tool['call_count']} calls]" if tool["call_count"] > 1 else ""
+                    tool["display_label"] = f"{tool['label']}{count_str}{duration_str}"
+                
+                # We don't need the internal tool_map anymore
+                del item["tool_map"]
 
-            count_str = ""
-            if info["call_count"] > 1:
-                count_str = f" [{info['call_count']} calls]"
-            
-            status_icon = "OK" if info["status"] == "completed" else "FAIL"
-
-            tool_steps.append({
-                "icon": status_icon,
-                "label": f"{mapped}{count_str}{duration_str}",
-                "timestamp": info["first_start"],
-                "type": "tool",
-            })
-
-        # Insert tool steps after first agent_start (index 1 position)
-        insert_pos = 1 if steps and steps[0]["type"] == "agent_start" else 0
-        for i, ts in enumerate(tool_steps):
-            steps.insert(insert_pos + i, ts)
-
-        return steps
+        return hierarchy
 
     @staticmethod
     def _markdown_to_elements(text: str, styles) -> list:
@@ -417,6 +370,38 @@ class PDFExportService:
             textColor=colors.grey
         )
 
+        # --- Hierarchical Styles ---
+        agent_step_style = ParagraphStyle(
+            'AgentStep',
+            parent=styles['Normal'],
+            fontSize=11,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor("#003366"),
+            spaceBefore=10,
+            spaceAfter=4,
+            leftIndent=0
+        )
+        
+        tool_step_style = ParagraphStyle(
+            'ToolStep',
+            parent=styles['Normal'],
+            fontSize=10,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor("#00509d"),
+            leftIndent=20,
+            spaceBefore=4,
+            spaceAfter=2,
+        )
+
+        detail_step_style = ParagraphStyle(
+            'DetailStep',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.grey,
+            leftIndent=40,
+            spaceAfter=1,
+        )
+
         elements = []
 
         # Header
@@ -450,61 +435,49 @@ class PDFExportService:
         elements.append(Paragraph(dto.request_context, ParagraphStyle('req', parent=styles['Normal'], leftIndent=10, rightIndent=10, backColor=colors.whitesmoke, borderPadding=10)))
         elements.append(Spacer(1, 10))
 
-        # --- Consolidated Investigation Steps ---
+        # --- Hierarchical Investigation Steps ---
         elements.append(Paragraph("INVESTIGATION STEPS", heading_style))
         
         consolidated = PDFExportService._consolidate_timeline(dto.events)
 
-        step_label_style = ParagraphStyle('StepLbl', parent=styles['Normal'], fontSize=10)
-
-        step_data = []
-        for idx, step in enumerate(consolidated, 1):
-            # Determine icon/color
-            stype = step["type"]
-            if stype == "agent_start":
-                icon_text = '<font color="#00509d"><b>&#9654;</b></font>'
-            elif stype == "agent_done":
-                icon_text = '<font color="#2d6a4f"><b>&#10003;</b></font>'
-            elif stype == "agent_error":
-                icon_text = '<font color="#cc0000"><b>&#10007;</b></font>'
-            elif stype == "tool" and "FAIL" in step.get("icon", ""):
-                icon_text = '<font color="#cc0000"><b>&#10007;</b></font>'
-            elif stype == "tool":
-                icon_text = '<font color="#2d6a4f"><b>&#10003;</b></font>'
-            elif stype == "final":
-                icon_text = '<font color="#003366"><b>&#9632;</b></font>'
-            else:
-                icon_text = '<font color="grey">&#8226;</font>'
-            
-            # Format timestamp to HH:MM:SS
-            ts = step.get("timestamp", "")
+        def format_ts_display(ts: str) -> str:
+            if not ts: return ""
             try:
                 dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                ts_display = dt.strftime("%H:%M:%S")
+                return dt.strftime("%H:%M:%S")
             except (ValueError, TypeError):
-                ts_display = ts[:8] if len(ts) > 8 else ts
-            
-            step_data.append([
-                Paragraph(str(idx), ParagraphStyle('snum', fontSize=9, alignment=1, textColor=colors.grey)),
-                Paragraph(icon_text, ParagraphStyle('sicon', fontSize=11, alignment=1)),
-                Paragraph(f"<b>{step['label']}</b>", step_label_style),
-                Paragraph(ts_display, ParagraphStyle('sts', fontSize=8, alignment=2, textColor=colors.grey)),
-            ])
+                return ts[:8] if len(ts) > 8 else ts
 
-        if step_data:
-            step_table = Table(step_data, colWidths=[0.3*inch, 0.3*inch, 4.2*inch, 1.0*inch])
-            step_table.setStyle(TableStyle([
-                ('ALIGN', (0, 0), (0, -1), 'CENTER'),
-                ('ALIGN', (1, 0), (1, -1), 'CENTER'),
-                ('ALIGN', (3, 0), (3, -1), 'RIGHT'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor("#eeeeee")),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
-                ('TOPPADDING', (0, 0), (-1, -1), 7),
-                ('LEFTPADDING', (2, 0), (2, -1), 8),
-            ]))
-            elements.append(step_table)
-        
+        for item in consolidated:
+            if item["type"] == "agent":
+                # 1. Agent Heading
+                agent_lbl = f"<font color='#00509d'><b>&#9654;</b></font>  {item['label']}"
+                elements.append(Paragraph(agent_lbl, agent_step_style))
+                
+                # Add bookmark for Agent
+                elements.append(Paragraph(f'<a name="{item["label"]}"/>', styles['Normal']))
+
+                for tool in item["tools"]:
+                    # 2. Tool Heading (Nested)
+                    status_color = "#2d6a4f" if tool["status"] == "completed" else "#cc0000" if tool["status"] == "failed" else "#00509d"
+                    icon = "&#10003;" if tool["status"] == "completed" else "&#10007;" if tool["status"] == "failed" else "&#8226;"
+                    tool_lbl = f"<font color='{status_color}'><b>{icon}</b></font>  {tool['display_label']}"
+                    elements.append(Paragraph(tool_lbl, tool_step_style))
+
+                    # 3. Tool Details (Double Nested)
+                    if tool["start_ts"]:
+                        elements.append(Paragraph(f"&#8212; Started: {format_ts_display(tool['start_ts'])}", detail_step_style))
+                    if tool["end_ts"]:
+                        elements.append(Paragraph(f"&#8212; Completed: {format_ts_display(tool['end_ts'])}", detail_step_style))
+                    
+                    elements.append(Spacer(1, 4))
+
+            elif item["type"] == "final":
+                elements.append(Spacer(1, 10))
+                final_lbl = f"<font color='#003366'><b>&#9632;</b></font>  {item['label']}"
+                elements.append(Paragraph(final_lbl, agent_step_style))
+                elements.append(Paragraph(f"<i>Time: {format_ts_display(item['timestamp'])}</i>", detail_step_style))
+
         elements.append(Spacer(1, 15))
 
         # --- Findings & Response (markdown rendered) ---

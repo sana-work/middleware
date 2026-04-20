@@ -286,3 +286,35 @@ async def test_process_implicit_success_event(mock_settings):
             latest_event_type="EXECUTION_FINAL_RESPONSE",
             completed_at="2026-04-15T12:00:00.000000",
         )
+
+
+@pytest.mark.asyncio
+async def test_process_event_with_business_description(mock_settings):
+    """Test that events correctly include a business_description field."""
+    raw_event = RawKafkaEvent(
+        correlation_id="aaaa-bbbb-cccc",
+        event_type="TOOL_INPUT_EVENT",
+        tool_name="get_case",
+        timestamp="2026-04-15T12:00:00.000000",
+    )
+
+    mock_execution = {
+        "correlation_id": "aaaa-bbbb-cccc",
+        "session_id": "sess-999",
+        "soeid": "TEST001",
+        "status": "running",
+    }
+
+    with (
+        patch("app.services.event_processing_service.ExecutionsRepository.get_execution", new_callable=AsyncMock, return_value=mock_execution),
+        patch("app.services.event_processing_service.EventsRepository.insert_event", new_callable=AsyncMock, return_value=True),
+        patch("app.services.event_processing_service.ExecutionsRepository.update_execution_status", new_callable=AsyncMock),
+    ):
+        result = await EventProcessingService.process_kafka_event(
+            raw_event=raw_event,
+            correlation_id="aaaa-bbbb-cccc",
+        )
+
+        assert result is not None
+        assert "business_description" in result
+        assert result["business_description"] == "Retrieving case details from the case management system"

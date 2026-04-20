@@ -171,6 +171,7 @@ X-SOEID: <user-id>
         "event_type": "AGENT_START_EVENT",
         "normalized_event_type": "agent_started",
         "agent_name": "Data_Retrieval_Agent",
+        "business_description": "Data Retrieval Agent has begun analyzing the request",
         "summary": "Agent started: Data_Retrieval_Agent",
         "timestamp": "2024-04-15T10:00:01Z"
       },
@@ -178,6 +179,7 @@ X-SOEID: <user-id>
         "event_type": "TOOL_INPUT_EVENT",
         "normalized_event_type": "tool_started",
         "tool_name": "ReconService",
+        "business_description": "Executing: Recon Service",
         "summary": "Scanning trade logs",
         "timestamp": "2024-04-15T10:00:05Z"
       }
@@ -222,16 +224,19 @@ X-SOEID: <user-id>
         "events": [
           {
             "event_type": "AGENT_START_EVENT",
+            "business_description": "Data Retrieval Agent has begun analyzing the request",
             "summary": "Agent started: Data_Retrieval_Agent",
             "timestamp": "2024-04-15T10:00:01Z"
           },
           {
             "event_type": "AGENT_COMPLETION_EVENT",
+            "business_description": "Data Retrieval Agent has finished its analysis",
             "summary": "Agent completed: Data_Retrieval_Agent",
             "timestamp": "2024-04-15T10:00:10Z"
           },
           {
             "event_type": "EXECUTION_FINAL_RESPONSE",
+            "business_description": "Investigation complete",
             "summary": "Final response generated",
             "timestamp": "2024-04-15T10:00:20Z"
           }
@@ -344,6 +349,7 @@ Expected cadence: every 15 seconds.
   "event": {
     "normalized_event_type": "tool_started",
     "tool_name": "ReconService",
+    "business_description": "Executing: Recon Service",
     "summary": "Searching trade logs for soeid ab12345..."
   }
 }
@@ -397,9 +403,9 @@ Expected cadence: every 15 seconds.
 
 | Kafka / Normalized Event | Execution Status | Frontend Meaning | Suggested UI Treatment |
 | :--- | :--- | :--- | :--- |
-| `AGENT_START_EVENT` | `running` | An agent started | Show “Agent [Name] is thinking…” |
-| `TOOL_INPUT_EVENT` | `in_progress` | Tool started | Show tool step spinner / “Running Tool: [Tool Name]…” |
-| `TOOL_OUTPUT_EVENT` | `in_progress` | Tool produced output | Pulse the tool step or append progress text |
+| `AGENT_START_EVENT` | `running` | An agent started | Show “Agent [Name] is thinking…” or use `business_description` |
+| `TOOL_INPUT_EVENT` | `in_progress` | Tool started | Show tool step spinner / use `business_description` |
+| `TOOL_OUTPUT_EVENT` | `in_progress` | Tool produced output | Pulse the tool step or use `business_description` (e.g. "Completed: [Task]") |
 | `AGENT_COMPLETION_EVENT` | `in_progress` | Specific agent finished | Note completion of sub-task; continue waiting for final response |
 | `TOOL_ERROR_EVENT` | `failed` | Tool failure | Show warning/error on the tool step |
 | `AGENT_ERROR_EVENT` | `failed` | Run failure | Show global error banner for the run |
@@ -471,11 +477,13 @@ Use history from persisted APIs only. Do not attempt to stitch history together 
         "events": [
           {
             "event_type": "AGENT_START_EVENT",
+            "business_description": "Agent logic initialized",
             "summary": "Agent logic initialized",
             "timestamp": "2024-04-15T10:00:01Z"
           },
           {
             "event_type": "TOOL_ERROR_EVENT",
+            "business_description": "Failed: Access timeout on log vault (non-recoverable)",
             "summary": "Access timeout on log vault (non-recoverable)",
             "tool_name": "VaultService",
             "timestamp": "2024-04-15T10:01:20Z"
@@ -494,6 +502,7 @@ Use history from persisted APIs only. Do not attempt to stitch history together 
   "correlation_id": "8d22f1b4-2972-4f51-8d2a-718695028495",
   "event": {
     "normalized_event_type": "tool_started",
+    "business_description": "Executing: Recon Service",
     "summary": "Searching trade logs for soeid ab12345..."
   }
 }

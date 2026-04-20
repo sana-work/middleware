@@ -114,6 +114,7 @@ class NormalizedEvent(BaseModel):
     status: str
     agent_name: Optional[str] = None
     tool_name: Optional[str] = None
+    business_description: Optional[str] = None
     timestamp: str
     summary: str
     payload: Optional[Dict[str, Any]] = None

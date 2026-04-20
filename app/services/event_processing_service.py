@@ -10,7 +10,9 @@ from app.models.kafka_events import (
     EVENT_SUMMARY_MAP,
     NormalizedEvent,
     ALLOWED_EVENT_TYPES,
-    TERMINAL_ERROR_PATTERNS
+    TERMINAL_ERROR_PATTERNS,
+    TOOL_BUSINESS_CONTEXT_MAP,
+    AGENT_BUSINESS_CONTEXT_MAP
 )
 from app.services.metrics_service import (
     KAFKA_EVENTS_PROCESSED_TOTAL,
@@ -22,6 +24,7 @@ from app.services.metrics_service import (
 )
 from app.utils.audit_logger import audit_logger
 from app.utils.datetime_utils import utc_now, format_iso
+from app.utils.business_logic import get_business_description
 
 logger = get_logger(__name__)
 
@@ -65,6 +68,11 @@ class EventProcessingService:
 
         normalized_type = EVENT_NORMALIZATION_MAP.get(event_type, "unknown")
         execution_status = EXECUTION_STATUS_MAP.get(event_type, "unknown")
+
+        # Generate business-friendly description
+        business_desc = get_business_description(
+            event_type, raw_event.tool_name, raw_event.agent_name
+        )
 
         # Build summary
         summary_template = EVENT_SUMMARY_MAP.get(event_type, "Event received")
@@ -121,6 +129,7 @@ class EventProcessingService:
             "status": execution_status,
             "agent_name": raw_event.agent_name,
             "tool_name": raw_event.tool_name,
+            "business_description": business_desc,
             "timestamp": event_timestamp,
             "summary": summary,
             "raw_payload": raw_event.model_dump(),
@@ -179,6 +188,7 @@ class EventProcessingService:
             "status": execution_status,
             "agent_name": raw_event.agent_name,
             "tool_name": raw_event.tool_name,
+            "business_description": business_desc,
             "timestamp": event_timestamp,
             "summary": summary,
             "payload": normalized_payload,
