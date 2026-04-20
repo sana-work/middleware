@@ -440,19 +440,13 @@ class PDFExportService:
         
         consolidated = PDFExportService._consolidate_timeline(dto.events)
 
-        def format_ts_display(ts: str) -> str:
-            if not ts: return ""
-            try:
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                return dt.strftime("%H:%M:%S")
-            except (ValueError, TypeError):
-                return ts[:8] if len(ts) > 8 else ts
+        # Removed local format_ts_display in favor of app.utils.datetime_utils.normalize_iso_string
 
         for item in consolidated:
             if item["type"] == "agent":
-                # 1. Agent Heading with Timestamp
-                ts_str = item["timestamp"].split("T")[1][:8] if "T" in item["timestamp"] else item["timestamp"]
-                agent_lbl = f"<font color='#00509d'><b>&#9654;</b></font>  {item['label']} <font color='#666666' size='8'>(Time: {ts_str})</font>"
+                # 1. Agent Heading with ISO Timestamp
+                ts_iso = normalize_iso_string(item["timestamp"])
+                agent_lbl = f"<font color='#00509d'><b>&#9654;</b></font>  {item['label']} <font color='#666666' size='8'>(Started: {ts_iso})</font>"
                 elements.append(Paragraph(agent_lbl, agent_step_style))
                 
                 # Add bookmark for Agent
@@ -467,17 +461,23 @@ class PDFExportService:
 
                     # 3. Tool Details (Double Nested)
                     if tool["start_ts"]:
-                        elements.append(Paragraph(f"&#8212; Started: {format_ts_display(tool['start_ts'])}", detail_step_style))
+                        elements.append(Paragraph(f"&#8212; Started: {normalize_iso_string(tool['start_ts'])}", detail_step_style))
                     if tool["end_ts"]:
-                        elements.append(Paragraph(f"&#8212; Completed: {format_ts_display(tool['end_ts'])}", detail_step_style))
+                        elements.append(Paragraph(f"&#8212; Completed: {normalize_iso_string(tool['end_ts'])}", detail_step_style))
                     
                     elements.append(Spacer(1, 4))
+                
+                # 4. Agent Completion (at the end of tool block)
+                if item.get("completed_at"):
+                    comp_ts = normalize_iso_string(item["completed_at"])
+                    elements.append(Paragraph(f"<b>&#8212; Analysis Completed: {comp_ts}</b>", detail_step_style))
+                    elements.append(Spacer(1, 8))
 
             elif item["type"] == "final":
                 elements.append(Spacer(1, 10))
                 final_lbl = f"<font color='#003366'><b>&#9632;</b></font>  {item['label']}"
                 elements.append(Paragraph(final_lbl, agent_step_style))
-                elements.append(Paragraph(f"<i>Time: {format_ts_display(item['timestamp'])}</i>", detail_step_style))
+                elements.append(Paragraph(f"<i>Time: {normalize_iso_string(item['timestamp'])}</i>", detail_step_style))
 
         elements.append(Spacer(1, 15))
 
