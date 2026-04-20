@@ -59,6 +59,32 @@ EVENT_SUMMARY_MAP: Dict[str, str] = {
     "EXECUTION_FINAL_RESPONSE": "Final response generated",
 }
 
+# --- Business-friendly tool descriptions ---
+# Maps technical tool names to human-readable descriptions for reports.
+# Tools not listed here will fall back to a generated description from the tool name.
+
+TOOL_BUSINESS_CONTEXT_MAP: Dict[str, str] = {
+    "get_case": "Retrieving case details from the case management system",
+    "get_nostro_id": "Looking up nostro account identifiers for reconciliation",
+    "find_break_details": "Investigating reconciliation break details and root causes",
+    "find_payments_by_amount": "Searching payment transactions matching the specified amount",
+    "get_payment_details": "Fetching detailed payment transaction information",
+    "search_cases": "Searching case management system for related cases",
+    "get_account_details": "Retrieving account information and balances",
+    "get_transaction_history": "Pulling transaction history for the specified account",
+    "match_payments": "Cross-referencing payments across systems for matching",
+    "get_break_summary": "Generating a summary of outstanding reconciliation breaks",
+}
+
+# --- Business-friendly agent descriptions ---
+
+AGENT_BUSINESS_CONTEXT_MAP: Dict[str, str] = {
+    "recon_ops_investigator_agent": "Reconciliation Operations Investigator",
+    "payment_investigator_agent": "Payment Investigation Specialist",
+    "break_resolution_agent": "Break Resolution Analyst",
+}
+
+
 
 class RawKafkaEvent(BaseModel):
     """

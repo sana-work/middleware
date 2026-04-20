@@ -9,6 +9,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 
 from app.models.export_models import ExportExecutionDTO, ExportEventDTO
+from app.models.kafka_events import TOOL_BUSINESS_CONTEXT_MAP, AGENT_BUSINESS_CONTEXT_MAP
 from app.db.repositories.executions_repository import ExecutionsRepository
 from app.db.repositories.events_repository import EventsRepository
 from app.core.logging import get_logger
@@ -40,18 +41,26 @@ class PDFExportService:
         for event in events:
             event_type = event.get("event_type")
             status = event.get("status")
+            tool_name = event.get("tool_name")
+            agent_name = event.get("agent_name")
             
             excerpt = None
             if include_raw:
                 excerpt = event.get("raw_payload")
+
+            # Generate business-friendly description
+            business_desc = PDFExportService._get_business_description(
+                event_type, tool_name, agent_name
+            )
 
             ev_dto = ExportEventDTO(
                 event_type=event_type or "unknown",
                 normalized_event_type=event.get("normalized_event_type", ""),
                 status=status or "unknown",
                 summary=event.get("summary", ""),
+                business_description=business_desc,
                 timestamp=event.get("timestamp", ""),
-                tool_name=event.get("tool_name"),
+                tool_name=tool_name,
                 raw_payload_excerpt=excerpt
             )
             event_dtos.append(ev_dto)
@@ -91,6 +100,48 @@ class PDFExportService:
             final_response=final_response,
             error_details=error_details
         )
+
+    @staticmethod
+    def _get_business_description(
+        event_type: Optional[str], tool_name: Optional[str], agent_name: Optional[str]
+    ) -> Optional[str]:
+        """Generate a business-friendly description for a given event."""
+        if not event_type:
+            return None
+
+        # Tool events: use the business context map or generate from tool name
+        if event_type in ("TOOL_INPUT_EVENT", "TOOL_OUTPUT_EVENT", "TOOL_ERROR_EVENT") and tool_name:
+            mapped = TOOL_BUSINESS_CONTEXT_MAP.get(tool_name)
+            if mapped:
+                if event_type == "TOOL_OUTPUT_EVENT":
+                    return f"Completed: {mapped}"
+                elif event_type == "TOOL_ERROR_EVENT":
+                    return f"Failed: {mapped}"
+                return mapped
+            
+            # Fallback: generate readable name from tool_name (e.g. get_case -> Get Case)
+            readable = tool_name.replace("_", " ").title()
+            if event_type == "TOOL_OUTPUT_EVENT":
+                return f"Completed: {readable}"
+            elif event_type == "TOOL_ERROR_EVENT":
+                return f"Failed: {readable}"
+            return f"Executing: {readable}"
+
+        # Agent events: use the agent business context or generate
+        if event_type in ("AGENT_START_EVENT", "AGENT_COMPLETION_EVENT", "AGENT_ERROR_EVENT") and agent_name:
+            friendly = AGENT_BUSINESS_CONTEXT_MAP.get(agent_name, agent_name.replace("_", " ").title())
+            if event_type == "AGENT_START_EVENT":
+                return f"{friendly} has begun analyzing the request"
+            elif event_type == "AGENT_COMPLETION_EVENT":
+                return f"{friendly} has finished its analysis"
+            elif event_type == "AGENT_ERROR_EVENT":
+                return f"{friendly} encountered an issue during analysis"
+
+        # Terminal event
+        if event_type == "EXECUTION_FINAL_RESPONSE":
+            return "Investigation complete — final response prepared for review"
+
+        return None
 
     @staticmethod
     async def generate_pdf(
@@ -174,12 +225,28 @@ class PDFExportService:
 
         # Timeline Section
         elements.append(Paragraph("EXECUTION TIMELINE", heading_style))
+        
+        biz_desc_style = ParagraphStyle(
+            'BizDesc', 
+            parent=styles['Normal'], 
+            fontSize=9, 
+            leftIndent=20, 
+            textColor=colors.HexColor("#2d6a4f"),
+            fontName='Helvetica-Oblique',
+            spaceBefore=2,
+            spaceAfter=2
+        )
+        
         last_idx = len(dto.events) - 1
         for i, event in enumerate(dto.events):
             # Formatted Event Block
             time_part = f"<font color='grey' size='9'>{event.timestamp}</font>"
             summary_part = f"<b>{event.summary}</b>"
             elements.append(Paragraph(f"{time_part} | {summary_part}", styles['Normal']))
+            
+            # Business context (the key enhancement)
+            if event.business_description:
+                elements.append(Paragraph(f"&#x2192; {event.business_description}", biz_desc_style))
             
             # Sub-details
             details = [f"Type: {event.normalized_event_type or event.event_type}"]

@@ -7,6 +7,7 @@ class ExportEventDTO(BaseModel):
     normalized_event_type: str
     status: str
     summary: str
+    business_description: Optional[str] = None
     timestamp: str
     tool_name: Optional[str] = None
     raw_payload_excerpt: Optional[Any] = None

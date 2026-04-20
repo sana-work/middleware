@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # Kafka Settings
     KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
     KAFKA_TOPIC: str = "agentic_events"
-    KAFKA_CONSUMER_GROUP: str = "agentic-group"
+    KAFKA_CONSUMER_GROUP: str = "agentic-middleware-recon"
     KAFKA_SECURITY_PROTOCOL: str = "PLAINTEXT"
     KAFKA_SSL_CAFILE: Optional[str] = None
     KAFKA_SSL_CERTFILE: Optional[str] = None
